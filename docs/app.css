@@ -14,6 +14,15 @@
   --warn-bg: #fdf3dd;
   --radius: 12px;
   --topbar-h: 73px;   /* 載入與縮放時由 JS 量測後覆寫 */
+
+  /* 依「這個數字從哪來」分組的色彩系統 */
+  --c-fact: #1e3c72;     /* 事實：你抄進來的股價與 EPS */
+  --c-market: #0e7490;   /* 市場推出來的：隱含成長率 */
+  --c-mine: #6d28d9;     /* 你的假設與其產物：成長率、合理價、上漲空間 */
+  --c-signal: #0f7b4f;   /* 訊號：落差（正負再分綠紅） */
+  --c-global: #64748b;   /* 全局設定：折現率、永續成長率 */
+  --c-warn: #8a5a00;     /* 警示：永續價值佔比 */
+  --shell-max: 1100px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +38,16 @@
     --bad-bg: #351a19;
     --warn: #e8c070;
     --warn-bg: #332714;
+
+    /* 深色底上要提亮，否則按鈕與色條都糊成一片 */
+    --brand: #3b6bbf;
+    --brand-2: #4d82d8;
+    --c-fact: #7aa6f0;
+    --c-market: #45c4d8;
+    --c-mine: #b78af5;
+    --c-signal: #5ddba0;
+    --c-global: #94a3b8;
+    --c-warn: #e8c070;
   }
 }
 
@@ -45,6 +64,13 @@ body {
 }
 
 /* ---- 頂部 ---- */
+
+/* 內容置中並限制最大寬度，否則在大螢幕上會一路撐到邊緣，
+   結果區的標題與數字被拉開到左右兩端，讀起來要跑很遠。 */
+.shell {
+  max-width: var(--shell-max);
+  margin: 0 auto;
+}
 
 .topbar {
   display: flex;
@@ -167,20 +193,6 @@ input:focus, select:focus {
   margin-bottom: 16px;
 }
 
-.panel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-}
-
-.add-grid .wide { grid-column: span 2; }
-
-.add-submit {
-  display: flex;
-  align-items: flex-end;
-  grid-column: 1 / -1;
-}
-
 .hint, .footnote {
   color: var(--muted);
   font-size: .82rem;
@@ -247,12 +259,12 @@ input:focus, select:focus {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: .86rem;
+  font-size: .82rem;
   white-space: nowrap;
 }
 
 th, td {
-  padding: 9px 10px;
+  padding: 8px 7px;
   text-align: left;
   border-bottom: 1px solid var(--line);
 }
@@ -277,7 +289,7 @@ thead th.sorted.asc::after { content: ' ▴'; }
 tbody tr:last-child td { border-bottom: none; }
 
 td input {
-  width: 72px;
+  width: 64px;
   padding: 3px 6px;
   text-align: right;
   font-size: .85rem;
@@ -396,7 +408,6 @@ td input:focus { background: var(--surface); border-color: var(--brand-2); }
   body { padding: 0 12px 40px; font-size: 16px; }
 
   .filters input[type="search"] { max-width: none; flex: 1 1 100%; }
-  .add-grid .wide { grid-column: span 1; }
 
   .table-wrap {
     overflow: visible;
@@ -555,14 +566,12 @@ td[data-col="note"] { display: none; }
 
 .calc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 12px 18px;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
 }
 
-.calculator > button {
-  margin-top: 16px;
-  width: 100%;
-}
+button.primary { width: 100%; }
+.calculator > button.primary { margin-top: 16px; }
 
 .calc-result {
   margin-top: 16px;
@@ -586,15 +595,28 @@ td[data-col="note"] { display: none; }
 .res-row > span {
   color: var(--muted);
   font-size: .84rem;
+  flex: 0 0 auto;
+}
+
+/* 標籤與數字之間用點線接起來，而不是把兩者推到左右兩端 */
+.res-row::after {
+  content: '';
   flex: 1 1 auto;
+  order: 1;
+  margin: 0 10px;
+  border-bottom: 1px dotted var(--line);
+  align-self: center;
 }
 
 .res-row > b {
+  order: 2;
   font-size: 1.05rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  text-align: right;
   flex: 0 0 auto;
 }
+
+#applyImplied { order: 3; }
 
 .res-row > b.na {
   font-size: .8rem;
@@ -604,11 +626,9 @@ td[data-col="note"] { display: none; }
   max-width: 60%;
 }
 
-.res-row > b.signal-cell.good { color: var(--good); }
-.res-row > b.signal-cell.bad { color: var(--bad); }
+.res-row > b.good { color: var(--good); }
+.res-row > b.bad { color: var(--bad); }
 .res-row > b.tv-heavy { color: var(--warn); }
-
-#applyImplied { flex: 0 0 auto; }
 
 .track-box {
   margin-top: 20px;
@@ -616,7 +636,7 @@ td[data-col="note"] { display: none; }
   border-top: 1px solid var(--line);
 }
 
-.track-box > button { margin-top: 14px; }
+.track-box > button { margin-top: 0; }
 
 /* ---- 手機 ---- */
 
@@ -628,4 +648,151 @@ td[data-col="note"] { display: none; }
   .res-row > span { flex: 1 1 100%; }
   .res-row > b { flex: 1 1 auto; text-align: left; font-size: 1.1rem; }
   .res-row > b.na { max-width: none; text-align: left; }
+}
+
+/* ---- 配色分區：輸入與結果共用同一套，眼睛可以跳著找 ---- */
+
+.sec-title {
+  margin: 0 0 14px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: .04em;
+}
+
+/* 輸入欄位左側色條標示所屬分組 */
+.calc-grid > label { padding-left: 10px; border-left: 3px solid transparent; }
+.calc-grid > label.g-id     { border-left-color: var(--line); }
+.calc-grid > label.g-fact   { border-left-color: var(--c-fact); }
+.calc-grid > label.g-mine   { border-left-color: var(--c-mine); }
+.calc-grid > label.g-global { border-left-color: var(--c-global); }
+
+.calc-grid > label.g-fact,
+.calc-grid > label.g-mine { color: var(--text); font-weight: 600; }
+
+/* 結果區：每列左側一個小色點，數值用該組顏色 */
+.res-row { position: relative; padding-left: 14px; }
+
+.res-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 1.05em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.res-row.c-market::before { background: var(--c-market); }
+.res-row.c-mine::before   { background: var(--c-mine); }
+.res-row.c-signal::before { background: var(--c-signal); }
+.res-row.c-warn::before   { background: var(--c-warn); }
+
+.res-row.c-market > b { color: var(--c-market); }
+.res-row.c-mine > b   { color: var(--c-mine); }
+.res-row.c-warn > b   { color: var(--c-warn); }
+.res-row > b.na       { color: var(--muted); }
+
+/* 表格欄位沿用同一套色 */
+thead th.c-fact   { color: var(--c-fact); }
+thead th.c-market { color: var(--c-market); }
+thead th.c-mine   { color: var(--c-mine); }
+thead th.c-signal { color: var(--c-signal); }
+thead th.c-warn   { color: var(--c-warn); }
+
+td.c-market { color: var(--c-market); font-weight: 600; }
+td.c-mine   { color: var(--c-mine); }
+td.c-market .na, td.c-mine .na { color: var(--muted); font-weight: 500; }
+
+/* 落差欄是訊號，表頭要比其他欄明顯 */
+thead th.c-signal { font-weight: 700; }
+
+/* 原本缺的：觀察中徽章 */
+.badge.watch { color: var(--c-market); background: transparent; border-color: var(--c-market); }
+
+/* ---- 狀態列 ---- */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: .84rem;
+  color: var(--muted);
+}
+
+/* ---- 啟動失敗橫幅與自救 ---- */
+
+.fatal {
+  background: var(--bad-bg);
+  color: var(--bad);
+  border-bottom: 2px solid var(--bad);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: .9rem;
+}
+
+.fatal[hidden] { display: none; }
+.fatal button { background: var(--bad); width: auto; flex: 0 0 auto; }
+
+/* ---- 回饋：新增的列短暫高亮、被拒絕的輸入 ---- */
+
+@keyframes flash-row {
+  from { background: var(--good-bg); }
+  to   { background: transparent; }
+}
+
+tbody tr.flash { animation: flash-row 1.6s ease-out; }
+
+td input.rejected {
+  border-color: var(--bad) !important;
+  background: var(--bad-bg);
+}
+
+.notice {
+  color: var(--good);
+  background: var(--good-bg);
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: .85rem;
+  margin: 10px 0 0;
+}
+
+.notice.bad { color: var(--bad); background: var(--bad-bg); }
+
+tr.row-error td {
+  color: var(--bad);
+  background: var(--bad-bg);
+  white-space: normal;
+}
+
+/* 底部圖例 */
+.footnote .key {
+  display: inline-block;
+  font-size: .72rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  margin: 0 4px 0 10px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+}
+
+.footnote .key:first-child { margin-left: 0; }
+.footnote .c-fact   { color: var(--c-fact); }
+.footnote .c-market { color: var(--c-market); }
+.footnote .c-mine   { color: var(--c-mine); }
+.footnote .c-signal { color: var(--c-signal); }
+.footnote .c-warn   { color: var(--c-warn); }
+
+/* ---- 手機 ---- */
+
+@media (max-width: 768px) {
+  .calc-grid { grid-template-columns: 1fr; }
+  .res-row::after { display: none; }
+  .res-row > span { flex: 1 1 100%; }
+  .status-bar { flex-wrap: wrap; }
+  .fatal { font-size: .85rem; }
 }

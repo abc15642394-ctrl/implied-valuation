@@ -2,11 +2,13 @@
 (function () {
   'use strict';
 
+  var BUILD = 3;            // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
   var STALE_DAYS = 30;      // 超過 30 天沒更新就標記
   var EXPORT_NUDGE_DAYS = 14;
+  var HUGE = 1e12;          // 超過這個量級就不要印出一長串數字
 
   var sort = { key: 'gap', dir: 'asc' };
   var filters = { text: '', market: '', status: '', tags: [] };
@@ -20,20 +22,23 @@
     });
   }
 
+  // 超大數字印成 16 位數沒有任何資訊量，只會把版面撐爆。
   function fmtNum(n, digits) {
     if (n === null || !isFinite(n)) return '—';
+    if (Math.abs(n) >= HUGE) return (n < 0 ? '< -' : '> ') + '1兆';
     return n.toFixed(digits === undefined ? 2 : digits);
   }
 
   function fmtPct(n, digits) {
     if (n === null || !isFinite(n)) return '—';
+    if (Math.abs(n) >= HUGE) return (n < 0 ? '< -' : '> ') + '1兆%';
     return n.toFixed(digits === undefined ? 2 : digits) + '%';
   }
 
   function fmtSigned(n, digits, unit) {
     if (n === null || !isFinite(n)) return '—';
-    var sign = n > 0 ? '+' : '';
-    return sign + n.toFixed(digits) + unit;
+    if (Math.abs(n) >= HUGE) return (n < 0 ? '< -1兆' : '> 1兆') + unit;
+    return (n > 0 ? '+' : '') + n.toFixed(digits) + unit;
   }
 
   // 輸入框顯示原始數值，不經 toFixed——否則 EPS 1.495 重新渲染後會變成 1.50，
@@ -57,7 +62,7 @@
 
   function settings() { return Store.getState().settings; }
 
-  // ---- 計算：每次渲染即時算，不存進 localStorage ----
+  // ---- 計算 ----
 
   function computeRow(stock, st) {
     var dr = st.discountRate / 100;
@@ -91,9 +96,10 @@
     return out;
   }
 
-  function statusMessage(status, eps) {
+  function statusMessage(status, eps, price) {
     if (status === 'invalid') {
       if (!(eps > 0)) return 'EPS ≤ 0，此模型不適用';
+      if (price !== undefined && !(price > 0)) return '股價必須大於 0';
       return '輸入不完整';
     }
     if (status === 'above') return '高於可求解上限（' + (Valuation.CAGR_MAX * 100) + '%）';
@@ -101,24 +107,26 @@
     return '—';
   }
 
-  function gapClass(gap) {
-    var cls = 'signal-cell';
-    if (gap <= GAP_GOOD) cls += ' good';
-    else if (gap >= GAP_BAD) cls += ' bad';
-    return cls;
+  function gapState(gap) {
+    if (gap <= GAP_GOOD) return 'good';
+    if (gap >= GAP_BAD) return 'bad';
+    return '';
   }
 
-  // ---- 估值計算器（頂部面板，即時雙向） ----
+  // ---- 估值計算器 ----
 
+  // 折現率與永續成長率直接讀欄位當下的值，讓它跟其他欄位一樣邊打邊算。
   function readCalc() {
     var st = settings();
+    var dr = numOrNull($('setDiscountRate').value);
+    var pg = numOrNull($('setPerpetualGrowth').value);
     return {
       price: numOrNull($('calcPrice').value),
       eps: numOrNull($('calcEps').value),
       g15: numOrNull($('calcG15').value),
       g610: numOrNull($('calcG610').value),
-      dr: st.discountRate,
-      pg: st.perpetualGrowth
+      dr: dr === null ? st.discountRate : dr,
+      pg: pg === null ? st.perpetualGrowth : pg
     };
   }
 
@@ -129,10 +137,13 @@
     el.hidden = false;
   }
 
-  function setRes(id, text, cls) {
+  // 只動狀態 class，保留 HTML 裡的基底 class（否則配色會被洗掉）。
+  var RES_STATES = ['good', 'bad', 'na', 'tv-heavy'];
+  function setRes(id, text, state) {
     var el = $(id);
     el.textContent = text;
-    el.className = cls || '';
+    RES_STATES.forEach(function (s) { el.classList.remove(s); });
+    if (state) el.classList.add(state);
   }
 
   function recalcCalculator() {
@@ -150,7 +161,7 @@
     var msg = $('calcMsg');
 
     if (!(v.dr > v.pg)) {
-      msg.textContent = '折現率必須大於永續成長率，否則永續價值公式會算出無限大或負數。';
+      msg.textContent = '折現率（' + v.dr + '%）必須大於永續成長率（' + v.pg + '%），否則永續價值公式會算出無限大或負數。';
       return;
     }
     if (v.eps === null) {
@@ -161,11 +172,16 @@
       msg.textContent = 'EPS ≤ 0，此模型不適用（股價對成長率會變成遞減，反推沒有意義）。';
       return;
     }
+    // D1：股價填了但不是正數時要指名是股價的問題，不能靜默跳過。
+    if (v.price !== null && v.price <= 0) {
+      msg.textContent = '股價必須大於 0，目前是 ' + v.price + '。';
+      return;
+    }
 
     var implied = null;
 
     // 方向一：股價 → 市場隱含成長率
-    if (v.price !== null && v.price > 0) {
+    if (v.price !== null) {
       var res = Valuation.impliedCagr1_5(v.price, v.eps, g610 / 100, v.dr / 100, v.pg / 100);
       if (res.status === 'ok') {
         implied = res.cagr * 100;
@@ -173,7 +189,7 @@
         $('applyImplied').hidden = false;
         $('applyImplied').dataset.value = implied;
       } else {
-        setRes('resImplied', statusMessage(res.status, v.eps), 'na');
+        setRes('resImplied', statusMessage(res.status, v.eps, v.price), 'na');
       }
     }
 
@@ -181,19 +197,18 @@
     if (v.g15 !== null) {
       var parts = Valuation.dcfParts(v.eps, v.g15 / 100, g610 / 100, v.dr / 100, v.pg / 100);
       if (isFinite(parts.total) && parts.total > 0) {
+        var tv = parts.terminal / parts.total * 100;
         setRes('resFair', fmtNum(parts.total) + ' 元');
-        setRes('resTv', fmtPct(parts.terminal / parts.total * 100, 0),
-          (parts.terminal / parts.total * 100) > TV_HEAVY ? 'tv-heavy' : '');
+        setRes('resTv', fmtPct(tv, 0), tv > TV_HEAVY ? 'tv-heavy' : '');
         if (v.price !== null && v.price > 0) {
           setRes('resUpside', fmtSigned((parts.total / v.price - 1) * 100, 1, '%'));
         }
       }
     }
 
-    // 兩個方向都有 → 落差
     if (implied !== null && v.g15 !== null) {
       var gap = implied - v.g15;
-      setRes('resGap', fmtSigned(gap, 2, 'pp'), gapClass(gap));
+      setRes('resGap', fmtSigned(gap, 2, 'pp'), gapState(gap));
     }
 
     if (v.price === null) {
@@ -212,7 +227,7 @@
     }
   }
 
-  // ---- 表格渲染 ----
+  // ---- 表格 ----
 
   function visibleRows() {
     var st = settings();
@@ -221,14 +236,8 @@
     var rows = Store.getState().stocks.filter(function (s) {
       if (filters.market && s.market !== filters.market) return false;
       if (filters.status && s.status !== filters.status) return false;
-      if (text) {
-        var hay = (s.ticker + ' ' + s.name).toLowerCase();
-        if (hay.indexOf(text) === -1) return false;
-      }
-      if (filters.tags.length) {
-        var hit = filters.tags.every(function (t) { return s.tags.indexOf(t) !== -1; });
-        if (!hit) return false;
-      }
+      if (text && (s.ticker + ' ' + s.name).toLowerCase().indexOf(text) === -1) return false;
+      if (filters.tags.length && !filters.tags.every(function (t) { return s.tags.indexOf(t) !== -1; })) return false;
       return true;
     }).map(function (s) {
       return { stock: s, calc: computeRow(s, st) };
@@ -239,8 +248,7 @@
   }
 
   function sortValue(row, key) {
-    var s = row.stock;
-    var c = row.calc;
+    var s = row.stock, c = row.calc;
     switch (key) {
       case 'ticker': return s.ticker;
       case 'name': return s.name;
@@ -264,16 +272,12 @@
   function sortRows(rows) {
     var dir = sort.dir === 'asc' ? 1 : -1;
     rows.sort(function (a, b) {
-      var va = sortValue(a, sort.key);
-      var vb = sortValue(b, sort.key);
-
-      // 算不出數字的（未估、EPS ≤ 0、超出上下界）一律排到最後，不參與比大小。
+      var va = sortValue(a, sort.key), vb = sortValue(b, sort.key);
       var na = va === null || va === undefined || (typeof va === 'number' && !isFinite(va));
       var nb = vb === null || vb === undefined || (typeof vb === 'number' && !isFinite(vb));
       if (na && nb) return 0;
       if (na) return 1;
       if (nb) return -1;
-
       if (typeof va === 'string') return va.localeCompare(vb, 'zh-Hant') * dir;
       return (va - vb) * dir;
     });
@@ -286,35 +290,38 @@
     status: '狀態', updatedAt: '更新', note: '備註', actions: ''
   };
 
+  var COL_TONE = {
+    price: 'c-fact', eps: 'c-fact',
+    myCagr1_5: 'c-mine', cagr6_10: 'c-mine', fairValue: 'c-mine', upside: 'c-mine',
+    implied: 'c-market', gap: 'c-signal', tvShare: 'c-warn'
+  };
+
   function editCell(stock, field) {
-    return '<td class="num" data-col="' + field + '" data-label="' + LABELS[field] + '">'
+    return '<td class="num ' + (COL_TONE[field] || '') + '" data-col="' + field + '" data-label="' + LABELS[field] + '">'
       + '<input type="number" step="any" inputmode="decimal" data-id="' + stock.id
       + '" data-field="' + field + '" value="' + inputValue(stock[field]) + '"></td>';
   }
 
-  // 計算出來的那幾格，就地編輯時只重畫這些，不重建整張表
-  // （重建會把焦點與手機卡片的展開狀態一起弄丟）。
   function computedHtml(col, s, c) {
     switch (col) {
       case 'implied':
         return c.impliedStatus === 'ok'
           ? fmtPct(c.implied)
-          : '<span class="signal-cell na">' + esc(statusMessage(c.impliedStatus, s.eps)) + '</span>';
+          : '<span class="signal-cell na">' + esc(statusMessage(c.impliedStatus, s.eps, s.price)) + '</span>';
       case 'gap':
         return c.gap === null
           ? '<span class="signal-cell na">—</span>'
-          : '<span class="' + gapClass(c.gap) + '">' + fmtSigned(c.gap, 2, 'pp') + '</span>';
+          : '<span class="signal-cell ' + gapState(c.gap) + '">' + fmtSigned(c.gap, 2, 'pp') + '</span>';
       case 'fairValue':
         return fmtNum(c.fairValue);
       case 'upside':
         return c.upside === null ? '—' : fmtSigned(c.upside, 1, '%');
       case 'tvShare':
-        return c.tvShare === null
-          ? '—'
+        return c.tvShare === null ? '—'
           : '<span class="' + (c.tvShare > TV_HEAVY ? 'tv-heavy' : '') + '">' + fmtPct(c.tvShare, 0) + '</span>';
       case 'updatedAt':
         var age = daysSince(s.updatedAt);
-        var dateText = s.updatedAt.slice(0, 10);
+        var dateText = String(s.updatedAt || '').slice(0, 10) || '—';
         return age !== null && age > STALE_DAYS
           ? '<span class="badge stale" title="' + age + ' 天沒更新">' + dateText + '</span>'
           : dateText;
@@ -326,16 +333,14 @@
   var COMPUTED_COLS = ['implied', 'gap', 'fairValue', 'upside', 'tvShare', 'updatedAt'];
 
   function rowHtml(row) {
-    var s = row.stock;
-    var c = row.calc;
-    var html = '<tr data-id="' + s.id + '">';
+    var s = row.stock, c = row.calc;
+    var html = '<tr data-id="' + esc(s.id) + '">';
 
-    html += '<td data-col="ticker" data-label="代號"><strong>' + esc(s.ticker) + '</strong></td>';
+    html += '<td data-col="ticker" data-label="代號"><strong>' + esc(s.ticker || '（無代號）') + '</strong></td>';
 
     var nameCell = esc(s.name);
     if (s.note) nameCell += ' <span class="badge" title="' + esc(s.note) + '">備註</span>';
     html += '<td data-col="name" data-label="名稱">' + nameCell + '</td>';
-
     html += '<td data-col="market" data-label="市場">' + (s.market === 'US' ? '美股' : '台股') + '</td>';
 
     html += editCell(s, 'price');
@@ -344,27 +349,21 @@
     html += editCell(s, 'cagr6_10');
 
     COMPUTED_COLS.slice(0, 5).forEach(function (col) {
-      html += '<td class="num" data-col="' + col + '" data-label="' + LABELS[col] + '">'
+      html += '<td class="num ' + (COL_TONE[col] || '') + '" data-col="' + col + '" data-label="' + LABELS[col] + '">'
         + computedHtml(col, s, c) + '</td>';
     });
 
     html += '<td class="row-tags" data-col="tags" data-label="標籤">'
-      + s.tags.map(function (t) { return '<span class="badge">' + esc(t) + '</span>'; }).join('')
-      + '</td>';
-
+      + s.tags.map(function (t) { return '<span class="badge">' + esc(t) + '</span>'; }).join('') + '</td>';
     html += '<td data-col="status" data-label="狀態"><span class="badge ' + s.status + '">'
       + (s.status === 'held' ? '持有' : '觀察中') + '</span></td>';
-
     html += '<td data-col="updatedAt" data-label="更新">' + computedHtml('updatedAt', s, c) + '</td>';
-
     html += '<td data-col="note" data-label="備註">' + esc(s.note || '—') + '</td>';
-
     html += '<td data-col="actions" data-label="">'
-      + '<button type="button" class="pill" data-helper-for="' + s.id + '">換算</button> '
-      + '<button type="button" class="del" data-del="' + s.id + '" title="刪除">✕</button></td>';
+      + '<button type="button" class="pill" data-helper-for="' + esc(s.id) + '">換算</button> '
+      + '<button type="button" class="del" data-del="' + esc(s.id) + '" title="刪除">✕</button></td>';
 
-    html += '</tr>';
-    return html;
+    return html + '</tr>';
   }
 
   function refreshRow(tr, stock) {
@@ -379,13 +378,21 @@
     var rows = visibleRows();
     var total = Store.getState().stocks.length;
 
-    $('stockBody').innerHTML = rows.map(rowHtml).join('');
+    // 一筆壞資料不該讓整張表消失——那正是「只剩表頭」那種無聲失敗的來源。
+    $('stockBody').innerHTML = rows.map(function (row) {
+      try { return rowHtml(row); }
+      catch (err) {
+        console.error('這一列畫不出來', row.stock, err);
+        return '<tr class="row-error"><td colspan="16">這一筆資料有問題，畫不出來（'
+          + esc(String((row.stock || {}).ticker || '未知')) + '）：' + esc(err.message) + '</td></tr>';
+      }
+    }).join('');
 
-    // 一檔都沒有、跟「有股票但全被篩掉」是兩件事，訊息要分開講，
-    // 否則篩選沒中時畫面會是一片沒有任何說明的空白。
     $('emptyState').hidden = total !== 0;
     $('noMatch').hidden = !(total > 0 && rows.length === 0);
     document.querySelector('.table-wrap').hidden = rows.length === 0;
+
+    updateCountLine(total, rows.length);
 
     document.querySelectorAll('thead th[data-sort]').forEach(function (th) {
       th.classList.toggle('sorted', th.dataset.sort === sort.key);
@@ -394,13 +401,31 @@
 
     renderTagFilters();
     renderExportNudge();
+    renderStorageWarning();
+  }
+
+  function filtersActive() {
+    return !!(filters.text || filters.market || filters.status || filters.tags.length);
+  }
+
+  function updateCountLine(total, shown) {
+    $('countLine').textContent = total === shown
+      ? '追蹤 ' + total + ' 檔'
+      : '追蹤 ' + total + ' 檔・目前顯示 ' + shown + ' 檔';
+    $('clearFilters').hidden = !filtersActive();
+  }
+
+  function renderStorageWarning() {
+    var el = $('storageWarn');
+    if (Store.canPersist()) { el.hidden = true; return; }
+    el.textContent = '這個瀏覽器不讓網頁儲存資料（可能是無痕模式或封鎖了網站資料）。'
+      + '你現在看到的內容只存在記憶體裡，重新整理就會消失——請先按右上角「匯出」備份。';
+    el.hidden = false;
   }
 
   function renderTagFilters() {
-    var tags = Store.allTags();
-    $('tagFilters').innerHTML = tags.map(function (t) {
-      var on = filters.tags.indexOf(t) !== -1;
-      return '<button type="button" class="tag-chip' + (on ? ' on' : '')
+    $('tagFilters').innerHTML = Store.allTags().map(function (t) {
+      return '<button type="button" class="tag-chip' + (filters.tags.indexOf(t) !== -1 ? ' on' : '')
         + '" data-tag="' + esc(t) + '">' + esc(t) + '</button>';
     }).join('');
   }
@@ -409,7 +434,6 @@
     var el = $('exportNudge');
     var days = Store.daysSinceExport();
     if (Store.getState().stocks.length === 0) { el.hidden = true; return; }
-
     el.hidden = false;
     if (days === null) {
       el.textContent = '還沒匯出過備份';
@@ -420,8 +444,6 @@
     }
   }
 
-  // 只負責把設定值寫回那兩個欄位；絕不碰 calcG610，
-  // 否則使用者手動改的 6-10 年會在每次動設定時被蓋回預設值。
   function renderSettings() {
     $('setDiscountRate').value = settings().discountRate;
     $('setPerpetualGrowth').value = settings().perpetualGrowth;
@@ -429,11 +451,8 @@
 
   // ---- 輔助計算機 ----
 
-  function openModal(id) { $(id).hidden = false; }
-  function closeModal(id) { $(id).hidden = true; }
-
   function closeAllModals() {
-    ['ratesModal', 'endpointsModal', 'helperPicker'].forEach(closeModal);
+    ['ratesModal', 'endpointsModal', 'helperPicker'].forEach(function (id) { $(id).hidden = true; });
   }
 
   function applyCagr(value) {
@@ -459,7 +478,6 @@
     var n = parseInt($('rateYears').value, 10);
     if (!isFinite(n) || n < 1) n = 1;
     if (n > 10) n = 10;
-
     var html = '';
     for (var i = 1; i <= n; i++) {
       html += '<label>第 ' + i + ' 年<span class="field">'
@@ -471,11 +489,9 @@
   }
 
   function recalcRates() {
-    var inputs = document.querySelectorAll('.rate-input');
     var rates = [];
     var missing = false;
-
-    inputs.forEach(function (inp) {
+    document.querySelectorAll('.rate-input').forEach(function (inp) {
       var v = numOrNull(inp.value);
       if (v === null) { missing = true; return; }
       rates.push(v / 100);
@@ -484,17 +500,14 @@
     if (missing || !rates.length) {
       $('ratesOut').textContent = '把每一年的成長率都填上';
       $('ratesApply').disabled = true;
-      $('ratesApply').dataset.value = '';
       return;
     }
-
     var cagr = Valuation.cagrFromRates(rates);
     if (cagr === null) {
       $('ratesOut').textContent = '這組成長率算不出 CAGR（累積值為負）';
       $('ratesApply').disabled = true;
       return;
     }
-
     var pct = cagr * 100;
     $('ratesOut').textContent = rates.length + ' 年複合年均成長率：' + pct.toFixed(2) + '%';
     $('ratesApply').disabled = false;
@@ -502,29 +515,26 @@
   }
 
   function recalcEndpoints() {
-    var years = numOrNull($('epYears').value);
-    var start = numOrNull($('epStart').value);
-    var end = numOrNull($('epEnd').value);
-
-    var cagr = Valuation.cagrFromEndpoints(start, end, years);
+    var cagr = Valuation.cagrFromEndpoints(
+      numOrNull($('epStart').value), numOrNull($('epEnd').value), numOrNull($('epYears').value));
     if (cagr === null) {
       $('endpointsOut').textContent = '年數、期初、期末都要填，且期初與期末須大於 0';
       $('endpointsApply').disabled = true;
       return;
     }
-
     var pct = cagr * 100;
-    $('endpointsOut').textContent = years + ' 年複合年均成長率：' + pct.toFixed(2) + '%';
+    $('endpointsOut').textContent = $('epYears').value + ' 年複合年均成長率：' + pct.toFixed(2) + '%';
     $('endpointsApply').disabled = false;
     $('endpointsApply').dataset.value = pct;
   }
 
   // ---- 加入追蹤 ----
 
-  function showAddMsg(text) {
+  function showAddMsg(text, isError) {
     var el = $('addMsg');
     if (!text) { el.hidden = true; el.textContent = ''; return; }
     el.textContent = text;
+    el.classList.toggle('bad', !!isError);
     el.hidden = false;
   }
 
@@ -532,9 +542,8 @@
     var v = readCalc();
     var ticker = $('newTicker').value.trim();
 
-    // 不靠瀏覽器那顆很小的驗證泡泡——使用者已經漏看過一次。
-    if (!ticker) { showAddMsg('請先填代號，才知道這筆要存成哪一檔。'); $('newTicker').focus(); return; }
-    if (v.price === null && v.eps === null) { showAddMsg('至少要有股價或 EPS 才有東西可以存。'); return; }
+    if (!ticker) { showAddMsg('請先在上方「股票資料」填代號，才知道這筆要存成哪一檔。', true); $('newTicker').focus(); return; }
+    if (v.price === null && v.eps === null) { showAddMsg('至少要有股價或 EPS 才有東西可以存。', true); return; }
 
     var market = $('newMarket').value;
     var payload = {
@@ -551,52 +560,56 @@
     };
 
     var existing = Store.findByTicker(market, ticker);
+    var id;
     if (existing) {
       if (!confirm(ticker + ' 已經在追蹤清單裡了，要用現在計算器上的數字覆蓋嗎？')) return;
       Store.updateStock(existing.id, payload);
+      id = existing.id;
     } else {
-      Store.addStock(payload);
+      id = Store.addStock(payload).id;
     }
 
-    showAddMsg('');
     $('newTicker').value = '';
     $('newName').value = '';
     $('newTags').value = '';
     $('newNote').value = '';
     render();
+
+    // 表格在第一屏外，不捲過去的話使用者會以為什麼都沒發生。
+    var total = Store.getState().stocks.length;
+    showAddMsg((existing ? '已更新 ' : '已加入 ') + ticker + '，共追蹤 ' + total + ' 檔。');
+    var tr = $('stockBody').querySelector('tr[data-id="' + id + '"]');
+    if (tr) {
+      tr.classList.add('flash');
+      setTimeout(function () { tr.classList.remove('flash'); }, 1600);
+      tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
   }
 
   // ---- 事件 ----
 
-  var CALC_INPUTS = ['calcPrice', 'calcEps', 'calcG15', 'calcG610'];
-
   function bind() {
-    CALC_INPUTS.forEach(function (id) {
+    ['calcPrice', 'calcEps', 'calcG15', 'calcG610'].forEach(function (id) {
       $(id).addEventListener('input', recalcCalculator);
     });
 
-    // 6-10 年改了就記成往後新增股票的預設值
     $('calcG610').addEventListener('change', function () {
       var v = numOrNull(this.value);
       if (v !== null) Store.updateSettings({ defaultCagr6_10: v });
     });
 
-    // 折現率、永續成長率是全局設定：驗證通過才寫入，失敗就退回上一個合法值
+    // 邊打邊算（readCalc 直接讀欄位），失焦才驗證並寫入全局設定
     ['setDiscountRate', 'setPerpetualGrowth'].forEach(function (id) {
+      $(id).addEventListener('input', recalcCalculator);
       $(id).addEventListener('change', function () {
-        var res = Store.updateSettings({
+        var patch = {
           discountRate: parseFloat($('setDiscountRate').value),
           perpetualGrowth: parseFloat($('setPerpetualGrowth').value),
           defaultCagr6_10: settings().defaultCagr6_10
-        });
-        if (!res.ok) {
-          // 必須寫在專屬的 calcError，recalcCalculator() 每次都會重寫 calcMsg，
-          // 寫在那裡會被立刻蓋掉，使用者就永遠看不到被退回的原因。
-          showCalcError(res.error);
-          renderSettings();
-        } else {
-          showCalcError('');
-        }
+        };
+        var res = Store.updateSettings(patch);
+        showCalcError(res.ok ? '' : res.error);
+        if (!res.ok) renderSettings();
         recalcCalculator();
         render();
       });
@@ -616,13 +629,13 @@
 
     $('helperBtn').addEventListener('click', function () {
       helperTarget = { kind: 'calc' };
-      openModal('helperPicker');
+      $('helperPicker').hidden = false;
     });
 
     $('addBtn').addEventListener('click', addToTracking);
     $('newTicker').addEventListener('input', function () { showAddMsg(''); });
 
-    // 就地編輯：只更新該列的計算欄位，不重建整張表
+    // 就地編輯：只更新該列，不重建整張表（否則焦點與手機展開狀態都會掉）
     $('stockBody').addEventListener('change', function (e) {
       var inp = e.target;
       if (!inp.dataset || !inp.dataset.field) return;
@@ -633,32 +646,39 @@
 
       var patch = {};
       if (field === 'myCagr1_5') {
-        patch[field] = numOrNull(inp.value);   // 清空＝改回「未估」
+        patch[field] = numOrNull(inp.value);              // 清空＝改回「未估」
       } else {
         var v = numOrNull(inp.value);
-        if (v === null) { inp.value = inputValue(stock[field]); return; }
+        // 股價與 EPS 必須是正數，否則那一列的計算全部失效卻沒有任何解釋。
+        if (v === null || ((field === 'price' || field === 'eps') && v <= 0)) {
+          inp.value = inputValue(stock[field]);
+          inp.classList.add('rejected');
+          inp.title = field === 'price' ? '股價必須大於 0' : (field === 'eps' ? 'EPS 必須大於 0' : '請輸入數字');
+          setTimeout(function () { inp.classList.remove('rejected'); }, 1200);
+          return;
+        }
+        inp.title = '';
         patch[field] = v;
       }
 
       Store.updateStock(stock.id, patch);
       refreshRow(inp.closest('tr'), Store.findStock(stock.id));
+      renderStorageWarning();
     });
 
     $('stockBody').addEventListener('click', function (e) {
       var del = e.target.closest('[data-del]');
       if (del) {
         var s = Store.findStock(del.dataset.del);
-        if (s && confirm('刪除 ' + s.ticker + '？')) { Store.removeStock(s.id); render(); }
+        if (s && confirm('刪除 ' + (s.ticker || '這一筆') + '？')) { Store.removeStock(s.id); render(); }
         return;
       }
-
       var helper = e.target.closest('[data-helper-for]');
       if (helper) {
         helperTarget = { kind: 'stock', id: helper.dataset.helperFor };
-        openModal('helperPicker');
+        $('helperPicker').hidden = false;
         return;
       }
-
       if (e.target.closest('input, button')) return;
       if (window.matchMedia('(max-width: 768px)').matches) {
         var tr = e.target.closest('tr');
@@ -669,12 +689,8 @@
     document.querySelectorAll('thead th[data-sort]').forEach(function (th) {
       th.addEventListener('click', function () {
         var key = th.dataset.sort;
-        if (sort.key === key) {
-          sort.dir = sort.dir === 'asc' ? 'desc' : 'asc';
-        } else {
-          sort.key = key;
-          sort.dir = 'asc';
-        }
+        if (sort.key === key) { sort.dir = sort.dir === 'asc' ? 'desc' : 'asc'; }
+        else { sort.key = key; sort.dir = 'asc'; }
         render();
       });
     });
@@ -683,57 +699,55 @@
     $('filterMarket').addEventListener('change', function () { filters.market = this.value; render(); });
     $('filterStatus').addEventListener('change', function () { filters.status = this.value; render(); });
 
+    $('clearFilters').addEventListener('click', function () {
+      filters = { text: '', market: '', status: '', tags: [] };
+      $('filterText').value = '';
+      $('filterMarket').value = '';
+      $('filterStatus').value = '';
+      render();
+    });
+
     $('tagFilters').addEventListener('click', function (e) {
       var chip = e.target.closest('[data-tag]');
       if (!chip) return;
-      var tag = chip.dataset.tag;
-      var i = filters.tags.indexOf(tag);
-      if (i === -1) { filters.tags.push(tag); } else { filters.tags.splice(i, 1); }
+      var i = filters.tags.indexOf(chip.dataset.tag);
+      if (i === -1) { filters.tags.push(chip.dataset.tag); } else { filters.tags.splice(i, 1); }
       render();
     });
 
     $('pickRates').addEventListener('click', function () {
-      closeModal('helperPicker');
+      $('helperPicker').hidden = true;
       buildRateInputs();
-      openModal('ratesModal');
+      $('ratesModal').hidden = false;
     });
 
     $('pickEndpoints').addEventListener('click', function () {
-      closeModal('helperPicker');
+      $('helperPicker').hidden = true;
       recalcEndpoints();
-      openModal('endpointsModal');
+      $('endpointsModal').hidden = false;
     });
 
     $('rateYears').addEventListener('input', buildRateInputs);
     $('rateInputs').addEventListener('input', recalcRates);
-    $('ratesApply').addEventListener('click', function () {
-      applyCagr(parseFloat(this.dataset.value));
-    });
+    $('ratesApply').addEventListener('click', function () { applyCagr(parseFloat(this.dataset.value)); });
 
     ['epYears', 'epStart', 'epEnd'].forEach(function (id) {
       $(id).addEventListener('input', recalcEndpoints);
     });
-    $('endpointsApply').addEventListener('click', function () {
-      applyCagr(parseFloat(this.dataset.value));
-    });
+    $('endpointsApply').addEventListener('click', function () { applyCagr(parseFloat(this.dataset.value)); });
 
     document.querySelectorAll('[data-close-modal]').forEach(function (btn) {
       btn.addEventListener('click', closeAllModals);
     });
-
     document.querySelectorAll('.modal').forEach(function (m) {
       m.addEventListener('click', function (e) { if (e.target === m) closeAllModals(); });
     });
-
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') closeAllModals();
-    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAllModals(); });
 
     $('exportBtn').addEventListener('click', function () {
       Store.exportJson();
       renderExportNudge();
     });
-
     $('importBtn').addEventListener('click', function () { $('importFile').click(); });
 
     $('importFile').addEventListener('change', function () {
@@ -742,17 +756,15 @@
       var reader = new FileReader();
       reader.onload = function () {
         var data;
-        try {
-          data = JSON.parse(reader.result);
-        } catch (err) {
-          alert('這個檔案不是有效的 JSON');
-          return;
-        }
-        var preview = Store.previewImport(data);
-        if (!preview.ok) { alert('無法匯入：' + preview.error); return; }
+        try { data = JSON.parse(reader.result); }
+        catch (err) { alert('這個檔案不是有效的 JSON'); return; }
 
-        var msg = '將新增 ' + preview.added + ' 筆、覆蓋 ' + preview.overwritten + ' 筆。要繼續嗎？';
-        if (!confirm(msg)) return;
+        var p = Store.previewImport(data);
+        if (!p.ok) { alert('無法匯入：' + p.error); return; }
+
+        var msg = '將新增 ' + p.added + ' 筆、覆蓋 ' + p.overwritten + ' 筆';
+        if (p.skipped) msg += '，略過 ' + p.skipped + ' 筆沒有代號的紀錄';
+        if (!confirm(msg + '。要繼續嗎？')) return;
 
         Store.applyImport(data);
         renderSettings();
@@ -773,14 +785,89 @@
   }
 
   function registerServiceWorker() {
-    if (!('serviceWorker' in navigator)) return;
-    if (location.protocol === 'file:') return;
-    navigator.serviceWorker.register('sw.js').catch(function (err) {
+    if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+    // updateViaCache: 'none' —— 否則 sw.js 自己也會被 max-age=600 擋住，新版要等十分鐘才被發現
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function (err) {
       console.warn('Service worker 註冊失敗', err);
     });
   }
 
+  // ---- 啟動與自救 ----
+
+  // 橫幅必須能在「HTML 是舊版、根本沒有這個元素」時也出現——
+  // 那正是最需要它的情況。所以找不到就自己建一個。
+  function showFatal(err) {
+    var b = $('fatalBanner');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'fatalBanner';
+      b.className = 'fatal';
+      b.setAttribute('style',
+        'position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;gap:12px;' +
+        'align-items:center;flex-wrap:wrap;padding:14px 16px;font:14px/1.5 -apple-system,sans-serif;' +
+        'background:#fdeceb;color:#b3261e;border-bottom:2px solid #b3261e;');
+      b.innerHTML = '<strong>網頁沒能正常啟動。</strong><span id="fatalDetail"></span>';
+      var btn = document.createElement('button');
+      btn.id = 'fatalReset';
+      btn.type = 'button';
+      btn.textContent = '清除快取並重新載入';
+      btn.setAttribute('style',
+        'background:#b3261e;color:#fff;border:none;border-radius:8px;padding:8px 14px;' +
+        'cursor:pointer;font:inherit;');
+      b.appendChild(btn);
+      document.body.insertBefore(b, document.body.firstChild);
+    }
+    var detail = $('fatalDetail');
+    if (detail) detail.textContent = err && err.message ? err.message : String(err);
+    var reset = $('fatalReset');
+    if (reset && !reset.dataset.bound) {
+      reset.dataset.bound = '1';
+      reset.addEventListener('click', hardReset);
+    }
+    b.hidden = false;
+  }
+
+  function hardReset() {
+    var jobs = [];
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      jobs.push(navigator.serviceWorker.getRegistrations()
+        .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
+        .catch(function () {}));
+    }
+    if (window.caches) {
+      jobs.push(caches.keys()
+        .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
+        .catch(function () {}));
+    }
+    Promise.all(jobs).then(function () { location.reload(); });
+  }
+
+  // HTML 與 JS 必須同版才能運作。不一致就自動重載一次搶救，
+  // 用 sessionStorage 當旗標避免無限迴圈。
+  function versionMatches() {
+    var meta = document.querySelector('meta[name="app-build"]');
+    var htmlBuild = meta ? parseInt(meta.content, 10) : NaN;
+    if (htmlBuild === BUILD) { sessionStorage.removeItem('iv-reloaded'); return true; }
+
+    if (!sessionStorage.getItem('iv-reloaded')) {
+      sessionStorage.setItem('iv-reloaded', '1');
+      hardReset();
+      return false;
+    }
+    showFatal(new Error('版本不一致：HTML 是 ' + htmlBuild + '，程式是 ' + BUILD
+      + '。請按下方按鈕清除快取。'));
+    return false;
+  }
+
   function init() {
+    var resetBtn = $('fatalReset');
+    if (resetBtn && !resetBtn.dataset.bound) {
+      resetBtn.dataset.bound = '1';
+      resetBtn.addEventListener('click', hardReset);
+    }
+
+    if (!versionMatches()) return;
+
     Store.load();
     Store.requestPersistence();
     renderSettings();
@@ -792,5 +879,8 @@
     registerServiceWorker();
   }
 
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', function () {
+    try { init(); }
+    catch (err) { console.error(err); showFatal(err); }
+  });
 })();

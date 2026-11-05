@@ -59,15 +59,23 @@
     };
   }
 
+  // 寫入失敗（無痕模式、封鎖網站資料、空間滿）會讓資料只存在記憶體裡，
+  // 重新整理就全沒了。所以失敗必須讓上層知道，不能假裝成功。
+  var lastWriteOk = true;
+
   function persist() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      lastWriteOk = true;
       return true;
     } catch (err) {
       console.error('寫入 localStorage 失敗', err);
+      lastWriteOk = false;
       return false;
     }
   }
+
+  function canPersist() { return lastWriteOk; }
 
   function load() {
     var raw = null;
@@ -151,6 +159,11 @@
     state.stocks.push(stock);
     persist();
     return stock;
+  }
+
+  // D3：沒有代號的紀錄無法被唯一識別，匯入時要略過而不是變成一列空白
+  function hasTicker(raw) {
+    return !!String((raw && raw.ticker) || '').trim();
   }
 
   function findStock(id) {
@@ -238,12 +251,14 @@
 
     var added = 0;
     var overwritten = 0;
+    var skipped = 0;
     incoming.stocks.forEach(function (raw) {
+      if (!hasTicker(raw)) { skipped++; return; }
       var s = normalizeStock(raw, state.settings);
       if (existing[stockKey(s)]) { overwritten++; } else { added++; }
     });
 
-    return { ok: true, added: added, overwritten: overwritten };
+    return { ok: true, added: added, overwritten: overwritten, skipped: skipped };
   }
 
   function applyImport(incoming) {
@@ -251,6 +266,7 @@
     state.stocks.forEach(function (s) { byKey[stockKey(s)] = s; });
 
     incoming.stocks.forEach(function (raw) {
+      if (!hasTicker(raw)) return;
       var s = normalizeStock(raw, state.settings);
       var key = stockKey(s);
       if (byKey[key]) {
@@ -315,6 +331,7 @@
     previewImport: previewImport,
     applyImport: applyImport,
     requestPersistence: requestPersistence,
+    canPersist: canPersist,
     daysSinceExport: daysSinceExport
   };
 })(window);
