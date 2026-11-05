@@ -13,7 +13,6 @@
   --warn: #8a5a00;
   --warn-bg: #fdf3dd;
   --radius: 12px;
-  --topbar-h: 73px;   /* 載入與縮放時由 JS 量測後覆寫 */
 
   /* 依「這個數字從哪來」分組的色彩系統 */
   --c-fact: #1e3c72;     /* 事實：你抄進來的股價與 EPS */
@@ -250,6 +249,7 @@ input:focus, select:focus {
 /* ---- 表格（桌機） ---- */
 
 .table-wrap {
+  scroll-margin-top: 90px;
   overflow-x: auto;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -269,9 +269,12 @@ th, td {
   border-bottom: 1px solid var(--line);
 }
 
+/* 絕對不要在這裡加 position: sticky。
+   .table-wrap 有 overflow-x: auto，依 CSS 規範 overflow-y 會跟著算成 auto，
+   它因此是一個捲動容器——sticky 的 top 會以「容器頂端」為基準而不是視窗，
+   容器只有 80 幾 px 高，表頭會被往下推，正好蓋住資料列。
+   單筆資料時那一列會被 100% 遮住，看起來就像表格永遠是空的。 */
 thead th {
-  position: sticky;
-  top: var(--topbar-h);
   background: var(--surface);
   color: var(--muted);
   font-size: .76rem;
@@ -286,6 +289,7 @@ thead th.num, td.num { text-align: right; }
 thead th.sorted::after { content: ' ▾'; color: var(--brand-2); }
 thead th.sorted.asc::after { content: ' ▴'; }
 
+tbody tr { scroll-margin-top: 90px; }
 tbody tr:last-child td { border-bottom: none; }
 
 td input {
@@ -574,6 +578,7 @@ button.primary { width: 100%; }
 .calculator > button.primary { margin-top: 16px; }
 
 .calc-result {
+  scroll-margin-top: 90px;
   margin-top: 16px;
   border: 1px solid var(--line);
   border-left: 4px solid var(--brand-2);
@@ -790,6 +795,11 @@ tr.row-error td {
 /* ---- 手機 ---- */
 
 @media (max-width: 768px) {
+  /* 手機上 topbar 換行後高達 114px，是螢幕的 14%。
+     黏著它只會讓捲到上緣的卡片永遠被蓋住一塊，不值得——改成一般捲動。 */
+  .topbar { position: static; }
+  .table-wrap, .calc-result, tbody tr { scroll-margin-top: 12px; }
+
   .calc-grid { grid-template-columns: 1fr; }
   .res-row::after { display: none; }
   .res-row > span { flex: 1 1 100%; }

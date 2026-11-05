@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 3;            // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 4;            // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -582,7 +582,18 @@
     if (tr) {
       tr.classList.add('flash');
       setTimeout(function () { tr.classList.remove('flash'); }, 1600);
-      tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      scrollRowIntoView(tr);
+    }
+  }
+
+  // 捲動後用座標確認元素真的在視窗內，而不是「呼叫過就當成功」。
+  // behavior: 'smooth' 在某些環境完全不作用，所以這裡一律用即時捲動。
+  function scrollRowIntoView(tr) {
+    tr.scrollIntoView({ block: 'center' });
+    var b = tr.getBoundingClientRect();
+    var topbar = document.querySelector('.topbar').getBoundingClientRect().bottom;
+    if (b.top < topbar || b.bottom > window.innerHeight) {
+      document.querySelector('.table-wrap').scrollIntoView({ block: 'center' });
     }
   }
 
@@ -617,7 +628,8 @@
 
     $('calcBtn').addEventListener('click', function () {
       recalcCalculator();
-      $('calcResult').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      // 不要加 behavior: 'smooth'——實測在這個環境下完全不會捲動。
+      $('calcResult').scrollIntoView({ block: 'nearest' });
     });
 
     $('applyImplied').addEventListener('click', function () {
@@ -775,13 +787,6 @@
       this.value = '';
     });
 
-    window.addEventListener('resize', syncTopbarHeight);
-  }
-
-  // 表頭 sticky 的偏移量必須等於 topbar 實際高度，寫死會在換行時露餡。
-  function syncTopbarHeight() {
-    var h = document.querySelector('.topbar').getBoundingClientRect().height;
-    document.documentElement.style.setProperty('--topbar-h', Math.round(h) + 'px');
   }
 
   function registerServiceWorker() {
@@ -875,7 +880,6 @@
     bind();
     recalcCalculator();
     render();
-    syncTopbarHeight();
     registerServiceWorker();
   }
 
