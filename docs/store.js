@@ -31,6 +31,14 @@
     return isFinite(n) ? n : fallback;
   }
 
+  // 「我估的成長率」可以是「還沒估」，那跟「估 0%」意義完全不同：
+  // 前者不該算出合理價與落差，後者會算出一個看似正常的假數字。
+  function numOrNull(value) {
+    if (value === null || value === undefined || value === '') return null;
+    var n = parseFloat(value);
+    return isFinite(n) ? n : null;
+  }
+
   // 把任意外來物件正規化成一筆乾淨的股票紀錄（匯入與新增共用）。
   function normalizeStock(raw, defaults) {
     return {
@@ -40,7 +48,7 @@
       market: raw.market === 'US' ? 'US' : 'TW',
       price: num(raw.price, 0),
       eps: num(raw.eps, 0),
-      myCagr1_5: num(raw.myCagr1_5, 0),
+      myCagr1_5: numOrNull(raw.myCagr1_5),
       cagr6_10: num(raw.cagr6_10, defaults.defaultCagr6_10),
       status: raw.status === 'held' ? 'held' : 'watch',
       tags: Array.isArray(raw.tags)
@@ -152,6 +160,15 @@
     return null;
   }
 
+  // 代號＋市場是唯一鍵；重複列會讓匯入只覆蓋其中一列、另一列變孤兒。
+  function findByTicker(market, ticker) {
+    var key = (market === 'US' ? 'US' : 'TW') + ':' + String(ticker || '').trim().toUpperCase();
+    for (var i = 0; i < state.stocks.length; i++) {
+      if (stockKey(state.stocks[i]) === key) return state.stocks[i];
+    }
+    return null;
+  }
+
   function updateStock(id, patch) {
     var stock = findStock(id);
     if (!stock) return null;
@@ -196,6 +213,7 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
+  // 唯一鍵：findByTicker 與匯入合併都靠它。
   function stockKey(stock) {
     return stock.market + ':' + stock.ticker;
   }
@@ -289,6 +307,7 @@
     updateSettings: updateSettings,
     addStock: addStock,
     findStock: findStock,
+    findByTicker: findByTicker,
     updateStock: updateStock,
     removeStock: removeStock,
     allTags: allTags,

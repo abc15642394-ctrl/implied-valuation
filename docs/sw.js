@@ -1,5 +1,5 @@
 // 離線快取 app shell。改版時 bump CACHE 版號以淘汰舊快取。
-var CACHE = 'iv-calc-v1';
+var CACHE = 'iv-calc-v2';
 var SHELL = [
   './',
   'index.html',

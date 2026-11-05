@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
 <meta name="theme-color" content="#1e3c72">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="隱含估值">
@@ -22,63 +23,76 @@
     <button type="button" id="exportBtn" class="ghost">匯出</button>
     <button type="button" id="importBtn" class="ghost">匯入</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
-    <button type="button" id="settingsToggle" class="ghost">設定</button>
   </div>
 </header>
 
-<section id="settingsPanel" class="panel" hidden>
-  <div class="panel-grid">
-    <label>折現率
-      <span class="field"><input type="number" id="setDiscountRate" step="0.1"><i>%</i></span>
-    </label>
-    <label>永續成長率
-      <span class="field"><input type="number" id="setPerpetualGrowth" step="0.1"><i>%</i></span>
-    </label>
-    <label>6-10 年成長率預設值
-      <span class="field"><input type="number" id="setDefaultCagr6_10" step="0.1"><i>%</i></span>
-    </label>
-  </div>
-  <p class="hint">折現率與永續成長率所有股票共用，改了全表立刻重算。折現率必須大於永續成長率。</p>
-  <p id="settingsError" class="error" hidden></p>
-</section>
+<section class="panel calculator">
+  <h2 class="calc-title">DCF 股票估值計算器</h2>
 
-<section class="panel">
-  <form id="addForm" class="panel-grid add-grid">
-    <label>代號
-      <span class="field"><input type="text" id="newTicker" placeholder="2330" required></span>
+  <div class="calc-grid">
+    <label>股價
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="calcPrice" placeholder="請輸入目前股價"><i>元</i></span>
     </label>
-    <label>名稱
-      <span class="field"><input type="text" id="newName" placeholder="台積電"></span>
+    <label>每股盈餘 (EPS)
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="calcEps" placeholder="請輸入 EPS"><i>元</i></span>
     </label>
-    <label>市場
-      <span class="field"><select id="newMarket"><option value="TW">台股</option><option value="US">美股</option></select></span>
-    </label>
-    <label>現價
-      <span class="field"><input type="number" id="newPrice" step="0.01" required></span>
-    </label>
-    <label>EPS
-      <span class="field"><input type="number" id="newEps" step="0.01" required></span>
-    </label>
-    <label>我估 1-5 年
+    <label>1-5年成長率
       <span class="field">
-        <input type="number" id="newMyCagr" step="0.01" required><i>%</i>
-        <button type="button" class="pill" data-open-helper="newMyCagr">算</button>
+        <input type="number" step="any" inputmode="decimal" id="calcG15" placeholder="留空＝反推市場隱含值"><i>%</i>
+        <button type="button" class="pill" id="helperBtn" title="用逐年成長率或期初期末換算">換算</button>
       </span>
     </label>
-    <label>6-10 年
-      <span class="field"><input type="number" id="newCagr610" step="0.01"><i>%</i></span>
+    <label>6-10年成長率
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="calcG610"><i>%</i></span>
     </label>
-    <label>狀態
-      <span class="field"><select id="newStatus"><option value="watch">觀察中</option><option value="held">持有</option></select></span>
+    <label>折現率
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="setDiscountRate"><i>%</i></span>
     </label>
-    <label class="wide">標籤（逗號分隔）
-      <span class="field"><input type="text" id="newTags" placeholder="AI 伺服器, 晶圓代工"></span>
+    <label>永續成長率
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="setPerpetualGrowth"><i>%</i></span>
     </label>
-    <label class="wide">備註
-      <span class="field"><input type="text" id="newNote" placeholder="這 EPS 用 2026 市場共識"></span>
-    </label>
-    <div class="add-submit"><button type="submit">加入追蹤</button></div>
-  </form>
+  </div>
+
+  <button type="button" id="calcBtn">開始計算</button>
+
+  <div id="calcResult" class="calc-result">
+    <div class="res-row">
+      <span>市場隱含 1-5 年成長率</span>
+      <b id="resImplied">—</b>
+      <button type="button" class="pill" id="applyImplied" hidden>帶入左欄</button>
+    </div>
+    <div class="res-row"><span>我估的合理價</span><b id="resFair">—</b></div>
+    <div class="res-row"><span>落差（隱含 − 我估）</span><b id="resGap">—</b></div>
+    <div class="res-row"><span>上漲空間</span><b id="resUpside">—</b></div>
+    <div class="res-row"><span>永續價值佔比</span><b id="resTv">—</b></div>
+  </div>
+  <p id="calcError" class="error" hidden></p>
+  <p id="calcMsg" class="hint"></p>
+
+  <div class="track-box">
+    <div class="calc-grid">
+      <label>代號
+        <span class="field"><input type="text" id="newTicker" placeholder="2330"></span>
+      </label>
+      <label>名稱
+        <span class="field"><input type="text" id="newName" placeholder="台積電"></span>
+      </label>
+      <label>市場
+        <span class="field"><select id="newMarket"><option value="TW">台股</option><option value="US">美股</option></select></span>
+      </label>
+      <label>狀態
+        <span class="field"><select id="newStatus"><option value="watch">觀察中</option><option value="held">持有</option></select></span>
+      </label>
+      <label>標籤（逗號分隔）
+        <span class="field"><input type="text" id="newTags" placeholder="AI 伺服器, 晶圓代工"></span>
+      </label>
+      <label>備註
+        <span class="field"><input type="text" id="newNote" placeholder="這 EPS 用 2026 市場共識"></span>
+      </label>
+    </div>
+    <button type="button" id="addBtn">加入追蹤</button>
+    <p id="addMsg" class="error" hidden></p>
+  </div>
 </section>
 
 <section class="filters">
@@ -88,7 +102,8 @@
   <div id="tagFilters" class="tag-filters"></div>
 </section>
 
-<p id="emptyState" class="empty" hidden>還沒有追蹤任何股票。用上面的表單加入第一檔。</p>
+<p id="emptyState" class="empty" hidden>還沒有追蹤任何股票。用上面的計算器算完後按「加入追蹤」。</p>
+<p id="noMatch" class="empty" hidden>沒有符合目前篩選條件的股票。</p>
 
 <div class="table-wrap">
   <table id="stockTable">
@@ -118,7 +133,8 @@
 
 <p class="footnote">
   落差＝市場隱含 1-5 年成長率 − 我估的成長率。負值表示市場的要求比我低，也就是相對低估。<br>
-  永續佔比＝合理價中由「第 10 年後永續成長」貢獻的比例；佔比越高，估值越是靠終值假設撐著。
+  永續佔比＝合理價中由「第 10 年後永續成長」貢獻的比例；佔比越高，估值越是靠終值假設撐著。<br>
+  折現率與永續成長率所有股票共用，改了整張表立刻重算。
 </p>
 
 <!-- 輔助計算機：逐年成長率 -->
@@ -126,12 +142,12 @@
   <div class="modal-box">
     <h2>逐年成長率 → CAGR</h2>
     <label>年數
-      <span class="field"><input type="number" id="rateYears" min="1" max="10" value="5"><i>年</i></span>
+      <span class="field"><input type="number" step="1" min="1" max="10" id="rateYears" value="5"><i>年</i></span>
     </label>
     <div id="rateInputs" class="rate-inputs"></div>
     <p id="ratesOut" class="result"></p>
     <div class="modal-actions">
-      <button type="button" id="ratesApply" disabled>帶入我估的 CAGR</button>
+      <button type="button" id="ratesApply" disabled>帶入 1-5 年成長率</button>
       <button type="button" class="ghost" data-close-modal>關閉</button>
     </div>
   </div>
@@ -142,17 +158,17 @@
   <div class="modal-box">
     <h2>期初期末 → CAGR</h2>
     <label>年數
-      <span class="field"><input type="number" id="epYears" min="1" step="0.5"><i>年</i></span>
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="epYears"><i>年</i></span>
     </label>
     <label>期初數值
-      <span class="field"><input type="number" id="epStart" step="0.01"></span>
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="epStart"></span>
     </label>
     <label>期末數值
-      <span class="field"><input type="number" id="epEnd" step="0.01"></span>
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="epEnd"></span>
     </label>
     <p id="endpointsOut" class="result"></p>
     <div class="modal-actions">
-      <button type="button" id="endpointsApply" disabled>帶入我估的 CAGR</button>
+      <button type="button" id="endpointsApply" disabled>帶入 1-5 年成長率</button>
       <button type="button" class="ghost" data-close-modal>關閉</button>
     </div>
   </div>

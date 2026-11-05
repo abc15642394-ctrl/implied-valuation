@@ -13,6 +13,7 @@
   --warn: #8a5a00;
   --warn-bg: #fdf3dd;
   --radius: 12px;
+  --topbar-h: 73px;   /* 載入與縮放時由 JS 量測後覆寫 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -258,7 +259,7 @@ th, td {
 
 thead th {
   position: sticky;
-  top: 56px;
+  top: var(--topbar-h);
   background: var(--surface);
   color: var(--muted);
   font-size: .76rem;
@@ -321,13 +322,6 @@ td input:focus { background: var(--surface); border-color: var(--brand-2); }
 }
 
 .del:hover { color: var(--bad); filter: none; }
-
-.note-row td {
-  color: var(--muted);
-  font-size: .8rem;
-  white-space: normal;
-  padding-top: 0;
-}
 
 /* ---- 彈窗 ---- */
 
@@ -413,8 +407,6 @@ td input:focus { background: var(--surface); border-color: var(--brand-2); }
 
   table, tbody { display: block; width: 100%; }
   thead { display: none; }
-
-  tbody tr.note-row { display: none; }
 
   tbody tr {
     display: grid;
@@ -543,3 +535,97 @@ td input:focus { background: var(--surface); border-color: var(--brand-2); }
 
 /* 備註只在手機展開時出現；桌機靠名稱欄的 title 提示。 */
 td[data-col="note"] { display: none; }
+
+/* ---- 估值計算器 ---- */
+
+.calculator { padding-top: 18px; }
+
+.calc-title {
+  margin: 0 0 16px;
+  text-align: center;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--brand);
+  letter-spacing: .02em;
+}
+
+@media (prefers-color-scheme: dark) {
+  .calc-title { color: #9db8ea; }
+}
+
+.calc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px 18px;
+}
+
+.calculator > button {
+  margin-top: 16px;
+  width: 100%;
+}
+
+.calc-result {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--brand-2);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 4px 14px;
+}
+
+.res-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.res-row:last-child { border-bottom: none; }
+
+.res-row > span {
+  color: var(--muted);
+  font-size: .84rem;
+  flex: 1 1 auto;
+}
+
+.res-row > b {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  flex: 0 0 auto;
+}
+
+.res-row > b.na {
+  font-size: .8rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-align: right;
+  max-width: 60%;
+}
+
+.res-row > b.signal-cell.good { color: var(--good); }
+.res-row > b.signal-cell.bad { color: var(--bad); }
+.res-row > b.tv-heavy { color: var(--warn); }
+
+#applyImplied { flex: 0 0 auto; }
+
+.track-box {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.track-box > button { margin-top: 14px; }
+
+/* ---- 手機 ---- */
+
+@media (max-width: 768px) {
+  .calc-grid { grid-template-columns: 1fr; gap: 10px; }
+  .calc-title { font-size: 1.1rem; }
+
+  .res-row { flex-wrap: wrap; }
+  .res-row > span { flex: 1 1 100%; }
+  .res-row > b { flex: 1 1 auto; text-align: left; font-size: 1.1rem; }
+  .res-row > b.na { max-width: none; text-align: left; }
+}
