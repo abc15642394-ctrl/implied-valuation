@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>股票 DCF 計算器</title>
+  <style>
+    body {
+      width: 840px !important;
+      padding: 20px;
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+      border-radius: 15px;
+      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+      backdrop-filter: blur(4px);
+    }
+    .title {
+      text-align: center;
+      color: #1e3c72;
+      margin-bottom: 15px;
+      font-size: 1.4em;
+      font-weight: 600;
+      text-shadow: 1px 1px 1px rgba(0,0,0,0.1);
+    }
+    .input-group {
+      margin-bottom: 10px;
+      position: relative;
+    }
+    label {
+      display: block;
+      margin-bottom: 3px;
+      color: #1e3c72;
+      font-size: 0.85em;
+      font-weight: 500;
+    }
+    input {
+      width: 100%;
+      padding: 6px 12px;
+      border: 2px solid #e1e5ea;
+      border-radius: 6px;
+      font-size: 0.9em;
+      box-sizing: border-box;
+      transition: all 0.3s ease;
+      background: rgba(255, 255, 255, 0.9);
+    }
+    input:focus {
+      outline: none;
+      border-color: #1e3c72;
+      box-shadow: 0 0 0 3px rgba(30, 60, 114, 0.1);
+    }
+    input::placeholder {
+      color: #a0aec0;
+    }
+    button {
+      width: 100%;
+      margin-top: 15px;
+      padding: 8px;
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1em;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(30, 60, 114, 0.2);
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(30, 60, 114, 0.3);
+    }
+    button:active {
+      transform: translateY(0);
+    }
+    #result {
+      margin-top: 15px;
+      padding: 10px;
+      background: rgba(30, 60, 114, 0.1);
+      border-radius: 6px;
+      color: #1e3c72;
+      font-weight: 500;
+      text-align: center;
+      border-left: 4px solid #1e3c72;
+    }
+    .input-container {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 5px;
+    }
+    .input-wrapper {
+      position: relative;
+    }
+    .unit {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #a0aec0;
+      font-size: 0.85em;
+    }
+    .input-group.disabled {
+      opacity: 0.7;
+    }
+    .input-group.disabled input {
+      background: #f5f5f5;
+      cursor: not-allowed;
+    }
+    .input-group.disabled label {
+      color: #666;
+    }
+    .calculators-container {
+      display: flex;
+      gap: 20px;
+      justify-content: space-between;
+    }
+    .calculator-section {
+      flex: 1;
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.95);
+    }
+    .calculator-section h3 {
+      margin-top: 0;
+      margin-bottom: 15px;
+      color: #1e3c72;
+    }
+    .input-group {
+      margin-bottom: 10px;
+    }
+    input[type="number"]:disabled {
+      background-color: #f5f5f5;
+      cursor: not-allowed;
+    }
+    #cagrResult {
+      margin-top: 10px;
+      font-weight: bold;
+      padding: 10px;
+      background: rgba(30, 60, 114, 0.1);
+      border-radius: 6px;
+      color: #1e3c72;
+      text-align: center;
+      border-left: 4px solid #1e3c72;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="calculators-container">
+      <div class="calculator-section">
+        <div class="title">DCF 股票估值計算器</div>
+        <div class="input-container">
+          <div class="input-group">
+            <label>股價</label>
+            <div class="input-wrapper">
+              <input type="number" id="stockPrice" step="0.01" placeholder="請輸入目前股價">
+              <span class="unit">元</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>每股盈餘 (EPS)</label>
+            <div class="input-wrapper">
+              <input type="number" id="eps" step="0.01" placeholder="請輸入 EPS">
+              <span class="unit">元</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>1-5年成長率</label>
+            <div class="input-wrapper">
+              <input type="number" id="cagr1_5" step="0.01" placeholder="例：10">
+              <span class="unit">%</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>6-10年成長率</label>
+            <div class="input-wrapper">
+              <input type="number" id="cagr6_10" step="0.01" placeholder="例：5">
+              <span class="unit">%</span>
+            </div>
+          </div>
+          <div class="input-group disabled">
+            <label>折現率 (固定)</label>
+            <div class="input-wrapper">
+              <input type="number" id="discountRate" value="10" disabled>
+              <span class="unit">%</span>
+            </div>
+          </div>
+          <div class="input-group disabled">
+            <label>永續成長率 (固定)</label>
+            <div class="input-wrapper">
+              <input type="number" id="perpetualGrowthRate" value="2" disabled>
+              <span class="unit">%</span>
+            </div>
+          </div>
+        </div>
+        <button id="calculateBtn">開始計算</button>
+        <div id="result"></div>
+      </div>
+
+      <div class="calculator-section">
+        <div class="title">複合成長率計算機</div>
+        <div class="input-container">
+          <div class="input-group">
+            <label for="yearCount">年數</label>
+            <div class="input-wrapper">
+              <input type="number" id="yearCount" min="1" max="5" value="5">
+              <span class="unit">年</span>
+            </div>
+          </div>
+          
+          <div class="input-group">
+            <label for="growth1">第一年成長率</label>
+            <div class="input-wrapper">
+              <input type="number" id="growth1" step="0.01">
+              <span class="unit">%</span>
+            </div>
+          </div>
+          
+          <div class="input-group">
+            <label for="growth2">第二年成長率</label>
+            <div class="input-wrapper">
+              <input type="number" id="growth2" step="0.01">
+              <span class="unit">%</span>
+            </div>
+          </div>
+          
+          <div class="input-group">
+            <label for="growth3">第三年成長率</label>
+            <div class="input-wrapper">
+              <input type="number" id="growth3" step="0.01">
+              <span class="unit">%</span>
+            </div>
+          </div>
+          
+          <div class="input-group">
+            <label for="growth4">第四年成長率</label>
+            <div class="input-wrapper">
+              <input type="number" id="growth4" step="0.01">
+              <span class="unit">%</span>
+            </div>
+          </div>
+          
+          <div class="input-group">
+            <label for="growth5">第五年成長率</label>
+            <div class="input-wrapper">
+              <input type="number" id="growth5" step="0.01">
+              <span class="unit">%</span>
+            </div>
+          </div>
+        </div>
+        <button id="calculateCAGRBtn">計算複合成長率</button>
+        <div id="cagrResult"></div>
+      </div>
+
+      <div class="calculator-section">
+        <div class="title">期初期末計算機</div>
+        <div class="input-container">
+          <div class="input-group">
+            <label>年數</label>
+            <div class="input-wrapper">
+              <input type="number" id="startEndYears" step="1" min="1">
+              <span class="unit">年</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>期初數值</label>
+            <div class="input-wrapper">
+              <input type="number" id="startValue" step="0.01">
+              <span class="unit">元</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>期末數值</label>
+            <div class="input-wrapper">
+              <input type="number" id="endValue" step="0.01">
+              <span class="unit">元</span>
+            </div>
+          </div>
+        </div>
+        <button id="calculateStartEndBtn">計算CAGR</button>
+        <div id="startEndResult"></div>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html> 

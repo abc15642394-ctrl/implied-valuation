@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "股票 DCF 計算器",
+  "version": "1.0",
+  "description": "使用DCF模型計算股票價值",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": [],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+} 

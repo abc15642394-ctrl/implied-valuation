@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>隱含估值追蹤</title>
+<meta name="theme-color" content="#1e3c72">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="隱含估值">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>隱含估值追蹤</h1>
+  <div class="topbar-actions">
+    <span id="exportNudge" class="nudge" hidden></span>
+    <button type="button" id="exportBtn" class="ghost">匯出</button>
+    <button type="button" id="importBtn" class="ghost">匯入</button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <button type="button" id="settingsToggle" class="ghost">設定</button>
+  </div>
+</header>
+
+<section id="settingsPanel" class="panel" hidden>
+  <div class="panel-grid">
+    <label>折現率
+      <span class="field"><input type="number" id="setDiscountRate" step="0.1"><i>%</i></span>
+    </label>
+    <label>永續成長率
+      <span class="field"><input type="number" id="setPerpetualGrowth" step="0.1"><i>%</i></span>
+    </label>
+    <label>6-10 年成長率預設值
+      <span class="field"><input type="number" id="setDefaultCagr6_10" step="0.1"><i>%</i></span>
+    </label>
+  </div>
+  <p class="hint">折現率與永續成長率所有股票共用，改了全表立刻重算。折現率必須大於永續成長率。</p>
+  <p id="settingsError" class="error" hidden></p>
+</section>
+
+<section class="panel">
+  <form id="addForm" class="panel-grid add-grid">
+    <label>代號
+      <span class="field"><input type="text" id="newTicker" placeholder="2330" required></span>
+    </label>
+    <label>名稱
+      <span class="field"><input type="text" id="newName" placeholder="台積電"></span>
+    </label>
+    <label>市場
+      <span class="field"><select id="newMarket"><option value="TW">台股</option><option value="US">美股</option></select></span>
+    </label>
+    <label>現價
+      <span class="field"><input type="number" id="newPrice" step="0.01" required></span>
+    </label>
+    <label>EPS
+      <span class="field"><input type="number" id="newEps" step="0.01" required></span>
+    </label>
+    <label>我估 1-5 年
+      <span class="field">
+        <input type="number" id="newMyCagr" step="0.01" required><i>%</i>
+        <button type="button" class="pill" data-open-helper="newMyCagr">算</button>
+      </span>
+    </label>
+    <label>6-10 年
+      <span class="field"><input type="number" id="newCagr610" step="0.01"><i>%</i></span>
+    </label>
+    <label>狀態
+      <span class="field"><select id="newStatus"><option value="watch">觀察中</option><option value="held">持有</option></select></span>
+    </label>
+    <label class="wide">標籤（逗號分隔）
+      <span class="field"><input type="text" id="newTags" placeholder="AI 伺服器, 晶圓代工"></span>
+    </label>
+    <label class="wide">備註
+      <span class="field"><input type="text" id="newNote" placeholder="這 EPS 用 2026 市場共識"></span>
+    </label>
+    <div class="add-submit"><button type="submit">加入追蹤</button></div>
+  </form>
+</section>
+
+<section class="filters">
+  <input type="search" id="filterText" placeholder="搜尋代號或名稱">
+  <select id="filterMarket"><option value="">全部市場</option><option value="TW">台股</option><option value="US">美股</option></select>
+  <select id="filterStatus"><option value="">全部狀態</option><option value="held">持有</option><option value="watch">觀察中</option></select>
+  <div id="tagFilters" class="tag-filters"></div>
+</section>
+
+<p id="emptyState" class="empty" hidden>還沒有追蹤任何股票。用上面的表單加入第一檔。</p>
+
+<div class="table-wrap">
+  <table id="stockTable">
+    <thead>
+      <tr>
+        <th data-sort="ticker">代號</th>
+        <th data-sort="name">名稱</th>
+        <th data-sort="market">市場</th>
+        <th data-sort="price" class="num">現價</th>
+        <th data-sort="eps" class="num">EPS</th>
+        <th data-sort="myCagr1_5" class="num">我估 1-5 年</th>
+        <th data-sort="cagr6_10" class="num">6-10 年</th>
+        <th data-sort="implied" class="num">市場隱含</th>
+        <th data-sort="gap" class="num signal">落差</th>
+        <th data-sort="fairValue" class="num">合理價</th>
+        <th data-sort="upside" class="num">上漲空間</th>
+        <th data-sort="tvShare" class="num">永續佔比</th>
+        <th data-sort="tags">標籤</th>
+        <th data-sort="status">狀態</th>
+        <th data-sort="updatedAt">更新</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="stockBody"></tbody>
+  </table>
+</div>
+
+<p class="footnote">
+  落差＝市場隱含 1-5 年成長率 − 我估的成長率。負值表示市場的要求比我低，也就是相對低估。<br>
+  永續佔比＝合理價中由「第 10 年後永續成長」貢獻的比例；佔比越高，估值越是靠終值假設撐著。
+</p>
+
+<!-- 輔助計算機：逐年成長率 -->
+<div id="ratesModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>逐年成長率 → CAGR</h2>
+    <label>年數
+      <span class="field"><input type="number" id="rateYears" min="1" max="10" value="5"><i>年</i></span>
+    </label>
+    <div id="rateInputs" class="rate-inputs"></div>
+    <p id="ratesOut" class="result"></p>
+    <div class="modal-actions">
+      <button type="button" id="ratesApply" disabled>帶入我估的 CAGR</button>
+      <button type="button" class="ghost" data-close-modal>關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- 輔助計算機：期初期末 -->
+<div id="endpointsModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>期初期末 → CAGR</h2>
+    <label>年數
+      <span class="field"><input type="number" id="epYears" min="1" step="0.5"><i>年</i></span>
+    </label>
+    <label>期初數值
+      <span class="field"><input type="number" id="epStart" step="0.01"></span>
+    </label>
+    <label>期末數值
+      <span class="field"><input type="number" id="epEnd" step="0.01"></span>
+    </label>
+    <p id="endpointsOut" class="result"></p>
+    <div class="modal-actions">
+      <button type="button" id="endpointsApply" disabled>帶入我估的 CAGR</button>
+      <button type="button" class="ghost" data-close-modal>關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- 選哪個輔助工具 -->
+<div id="helperPicker" class="modal" hidden>
+  <div class="modal-box narrow">
+    <h2>用哪個方式算 CAGR？</h2>
+    <div class="modal-actions column">
+      <button type="button" id="pickRates">輸入每年成長率</button>
+      <button type="button" id="pickEndpoints">輸入期初與期末值</button>
+      <button type="button" class="ghost" data-close-modal>取消</button>
+    </div>
+  </div>
+</div>
+
+<script src="valuation.js"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
