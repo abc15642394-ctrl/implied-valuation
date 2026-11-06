@@ -29,7 +29,16 @@
   }
 
   function nowIso() { return new Date().toISOString(); }
-  function today() { return new Date().toISOString().slice(0, 10); }
+
+  // 一定要用本地年月日。toISOString() 回的是 UTC——台北時間 00:00~08:00 之間
+  // 取出來的日期會是前一天，連帶把日期分組、趨勢圖 x 軸、差值基準全部弄錯。
+  function localDate(d) {
+    d = d || new Date();
+    return d.getFullYear() + '-'
+      + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+  }
+  function today() { return localDate(); }
 
   function num(value, fallback) {
     var n = parseFloat(value);
@@ -71,7 +80,9 @@
       name: String(raw.name || '').trim(),
       market: raw.market === 'US' ? 'US' : 'TW',
       status: raw.status === 'held' ? 'held' : 'watch',
-      tags: cleanTags(raw.tags)
+      tags: cleanTags(raw.tags),
+      starred: raw.starred === true,
+      starNote: String(raw.starNote || '')
     };
   }
 
@@ -86,6 +97,8 @@
       myCagr1_5: numOrNull(raw.myCagr1_5),
       cagr6_10: num(raw.cagr6_10, defaults.defaultCagr6_10),
       note: String(raw.note || ''),
+      starred: raw.starred === true,
+      starNote: String(raw.starNote || ''),
       createdAt: typeof raw.createdAt === 'string' ? raw.createdAt
         : (typeof raw.updatedAt === 'string' ? raw.updatedAt : nowIso())
     };
@@ -326,6 +339,33 @@
     return n;
   }
 
+  // 取消星號時保留 starNote，之後標回來原因還在。
+  function toggleStar(kind, id) {
+    var item = kind === 'stock' ? findStock(id) : findRecord(id);
+    if (!item) return null;
+    item.starred = !item.starred;
+    persist();
+    return item;
+  }
+
+  function setStarNote(kind, id, text) {
+    var item = kind === 'stock' ? findStock(id) : findRecord(id);
+    if (!item) return null;
+    item.starNote = String(text || '');
+    persist();
+    return item;
+  }
+
+  // 這一檔自己被標記，或底下有任何一筆被標記
+  function stockHasStar(stockId) {
+    var s = findStock(stockId);
+    if (s && s.starred) return true;
+    for (var i = 0; i < state.records.length; i++) {
+      if (state.records[i].stockId === stockId && state.records[i].starred) return true;
+    }
+    return false;
+  }
+
   function allTags() {
     var seen = {};
     state.stocks.forEach(function (s) { s.tags.forEach(function (t) { seen[t] = true; }); });
@@ -415,11 +455,12 @@
         .forEach(function (r) {
           if (haveRecord[r.id]) return;
           haveRecord[r.id] = true;
-          state.records.push({
-            id: r.id, stockId: target.id, date: r.date, label: r.label,
-            price: r.price, eps: r.eps, myCagr1_5: r.myCagr1_5,
-            cagr6_10: r.cagr6_10, note: r.note, createdAt: r.createdAt
-          });
+          // 整筆複製，只覆寫 stockId。逐欄列舉的話，以後每加一個欄位
+          // 都要記得同步改這裡，忘了就會在匯入時無聲消失。
+          var copy = {};
+          Object.keys(r).forEach(function (k) { copy[k] = r[k]; });
+          copy.stockId = target.id;
+          state.records.push(copy);
         });
     });
 
@@ -464,6 +505,10 @@
     latestRecord: latestRecord,
     countOf: countOf,
     allTags: allTags,
+    toggleStar: toggleStar,
+    setStarNote: setStarNote,
+    stockHasStar: stockHasStar,
+    localDate: localDate,
     exportJson: exportJson,
     previewImport: previewImport,
     applyImport: applyImport,

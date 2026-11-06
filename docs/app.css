@@ -1040,8 +1040,11 @@ button.pill.danger { background: var(--bad); color: #fff; border: none; }
   #recordTable tbody td:last-child { justify-content: flex-end; }
   #recordTable tbody td:last-child::before { display: none; }
   #recordTable .rec-note { max-width: none; }
+  /* 不換行的話差值會溢出到隔壁欄位，把對方的標籤壓掉（實測「6-10 年」只剩「年」）。 */
+  #recordTable tbody td { flex-wrap: wrap; min-width: 0; }
   #recordTable .delta { display: inline-block; margin: 0 0 0 6px; }
   #recordTable .val { display: inline-block; }
+  #recordTable tbody td::before { max-width: 52%; overflow: hidden; text-overflow: ellipsis; }
 }
 
 /* ---- 分頁表：日期分組標頭 ---- */
@@ -1108,4 +1111,101 @@ input[readonly], select:disabled {
   .g-hint, .g-base { display: block; margin-left: 0; margin-top: 2px; }
 
   .rec-actions { justify-content: flex-end; }
+}
+
+/* ---- 星號標記 ---- */
+
+.star {
+  background: none;
+  border: none;
+  padding: 0 5px 0 0;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--line);
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.star:hover { color: var(--warn); filter: none; }
+.star.on { color: #e8a800; }
+
+@media (prefers-color-scheme: dark) {
+  .star.on { color: #f0c43a; }
+}
+
+/* 被標記的紀錄整列淡底 */
+#recordTable tbody tr.starred td { background: var(--warn-bg); }
+
+.rec-time .t { font-variant-numeric: tabular-nums; }
+.rec-time .rec-label { margin-left: 6px; }
+
+.star-note {
+  display: block;
+  margin-top: 2px;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--warn);
+  white-space: normal;
+  max-width: 150px;
+}
+
+/* 篩選列的「只看標記」開關 */
+.tag-chip.star-chip { font-weight: 600; }
+.tag-chip.star-chip.on { background: #e8a800; border-color: #e8a800; color: #2a1c00; }
+
+/* 分頁表標頭的星號與原因 */
+#detailStar .star { font-size: 1.25rem; padding-right: 2px; }
+
+.star-note-input {
+  flex: 1 1 220px;
+  min-width: 160px;
+  max-width: 340px;
+  font-size: .82rem;
+  padding: 5px 9px;
+}
+
+.star-note-input[hidden] { display: none; }
+
+/* 趨勢圖上的標記點 */
+.trend-svg .dot-star-ring {
+  fill: none;
+  stroke: #e8a800;
+  stroke-width: 1.8;
+}
+
+.trend-svg .pt-label.starred { font-weight: 800; }
+.trend-legend .star-k { color: #e8a800; }
+.trend-legend .star-k::before { display: none; }
+
+.empty-rec { color: var(--muted); text-align: center; padding: 20px 0; }
+
+/* ---- 手機 ---- */
+
+@media (max-width: 768px) {
+  .star { font-size: 1.15rem; padding: 0 8px 0 0; }
+  .star-note { max-width: none; }
+  #recordTable tbody tr.starred { border-color: #e8a800; }
+  .star-note-input { flex: 1 1 100%; max-width: none; }
+  .detail-head { flex-wrap: wrap; }
+}
+
+.star-note-edit {
+  display: block;
+  margin-top: 4px;
+  width: 100%;
+  max-width: 180px;
+  font-size: .75rem;
+  padding: 3px 7px;
+  border-color: #e8a800;
+}
+
+@media (max-width: 768px) {
+  .star-note-edit { max-width: none; }
+}
+
+/* 窄桌機（769–1023px）：主表加了星號後會溢出 45px。
+   「狀態」本來就能篩選、分頁表裡也看得到，是這裡最適合讓位的一欄。 */
+@media (min-width: 769px) and (max-width: 1023px) {
+  #stockTable th[data-sort="status"],
+  #stockTable td[data-col="status"] { display: none; }
 }

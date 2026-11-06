@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 6;            // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 7;            // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -11,7 +11,10 @@
   var HUGE = 1e12;          // 超過這個量級就不要印出一長串數字
 
   var sort = { key: 'gap', dir: 'asc' };
-  var filters = { text: '', market: '', status: '', tags: [] };
+  // 單一來源。先前這個物件在初始化與 clearFilters 各寫一次，
+  // 加新欄位只改一處就會在「清除篩選」時把 key 弄丟。
+  function defaultFilters() { return { text: '', market: '', status: '', tags: [], starred: false }; }
+  var filters = defaultFilters();
   var helperTarget = null;  // { kind: 'calc' } 或 { kind: 'record', id: ... }
   var selectedStockId = null;
   var editingRecordId = null;
@@ -54,6 +57,13 @@
     if (t === '') return null;
     var n = parseFloat(t);
     return isFinite(n) ? n : null;
+  }
+
+  // createdAt 存的是 ISO（UTC）。顯示一定要轉本地，否則台北使用者會看到差 8 小時的時間。
+  function localTime(iso) {
+    var d = new Date(iso);
+    if (!isFinite(d.getTime())) return '—';
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
 
   function daysSince(dateStr) {
@@ -107,6 +117,15 @@
     if (status === 'above') return '超出上限';
     if (status === 'below') return '低於下限';
     return '—';
+  }
+
+  // 星號：點一下切換。有原因時顯示在 title。
+  function starHtml(kind, item) {
+    var on = item.starred === true;
+    var t = on ? (item.starNote ? '已標記：' + item.starNote : '已標記（點一下取消）') : '點一下標記';
+    return '<button type="button" class="star' + (on ? ' on' : '') + '" data-star="' + kind
+      + '" data-star-id="' + esc(item.id) + '" title="' + esc(t) + '" aria-pressed="' + on + '">'
+      + (on ? '★' : '☆') + '</button>';
   }
 
   function gapState(gap) {
@@ -232,6 +251,7 @@
       if (filters.status && s.status !== filters.status) return false;
       if (text && (s.ticker + ' ' + s.name).toLowerCase().indexOf(text) === -1) return false;
       if (filters.tags.length && !filters.tags.every(function (t) { return s.tags.indexOf(t) !== -1; })) return false;
+      if (filters.starred && !Store.stockHasStar(s.id)) return false;
       return true;
     }).map(function (s) {
       var rec = Store.latestRecord(s.id);
@@ -322,21 +342,26 @@
       : '<span class="' + (c.tvShare > TV_HEAVY ? 'tv-heavy' : '') + '">' + fmtPct(c.tvShare, 0) + '</span>';
   }
 
-  function dateHtml(dateStr) {
-    var age = daysSince(dateStr);
-    return age !== null && age > STALE_DAYS
-      ? '<span class="badge stale" title="' + age + ' 天沒更新">' + esc(dateStr) + '</span>'
-      : esc(dateStr);
+  // 同一年只顯示月日（完整日期放 title），省下的寬度讓星號放得進代號欄。
+  function shortDate(dateStr) {
+    var y = String(dateStr).slice(0, 4);
+    return y === String(new Date().getFullYear()) ? String(dateStr).slice(5) : dateStr;
   }
 
-  var MAIN_COMPUTED = ['implied', 'gap', 'fairValue', 'upside'];
+  function dateHtml(dateStr) {
+    var age = daysSince(dateStr);
+    var txt = esc(shortDate(dateStr));
+    return age !== null && age > STALE_DAYS
+      ? '<span class="badge stale" title="' + esc(dateStr) + '（' + age + ' 天沒更新）">' + txt + '</span>'
+      : '<span title="' + esc(dateStr) + '">' + txt + '</span>';
+  }
 
   function rowHtml(row) {
     var s = row.stock, r = row.rec, c = row.calc;
     var sel = s.id === selectedStockId ? ' class="selected"' : '';
     var html = '<tr data-stock="' + esc(s.id) + '"' + sel + '>';
 
-    html += cell('ticker', '<strong>' + esc(s.ticker || '（無代號）') + '</strong>'
+    html += cell('ticker', starHtml('stock', s) + '<strong>' + esc(s.ticker || '（無代號）') + '</strong>'
       + ' <span class="mkt">' + (s.market === 'US' ? 'US' : 'TW') + '</span>');
     html += cell('name', '<span class="ellip" title="' + esc(s.name) + '">' + esc(s.name) + '</span>');
 
@@ -392,7 +417,12 @@
     $('noMatch').hidden = !(total > 0 && rows.length === 0);
     document.querySelector('.table-wrap').hidden = rows.length === 0;
 
-    updateCountLine(total, rows.length);
+    var shownRecords = rows.reduce(function (n, r) {
+      return n + (filters.starred
+        ? Store.recordsOf(r.stock.id).filter(function (x) { return x.starred; }).length
+        : r.count);
+    }, 0);
+    updateCountLine(total, rows.length, shownRecords);
 
     document.querySelectorAll('thead th[data-sort]').forEach(function (th) {
       th.classList.toggle('sorted', th.dataset.sort === sort.key);
@@ -406,13 +436,17 @@
   }
 
   function filtersActive() {
-    return !!(filters.text || filters.market || filters.status || filters.tags.length);
+    return !!(filters.text || filters.market || filters.status || filters.tags.length || filters.starred);
   }
 
-  function updateCountLine(total, shown) {
-    var recs = Store.getState().records.length;
-    var base = '追蹤 ' + total + ' 檔・' + recs + ' 筆紀錄';
-    $('countLine').textContent = total === shown ? base : base + '（目前顯示 ' + shown + ' 檔）';
+  // 紀錄數也要反映篩選，否則會出現「畫面上 3 筆、上面寫 62 筆」這種誤導。
+  function updateCountLine(total, shownStocks, shownRecords) {
+    var allRecs = Store.getState().records.length;
+    var base = '追蹤 ' + total + ' 檔・' + allRecs + ' 筆紀錄';
+    if (total !== shownStocks || allRecs !== shownRecords) {
+      base += '（目前顯示 ' + shownStocks + ' 檔・' + shownRecords + ' 筆）';
+    }
+    $('countLine').textContent = base;
     $('clearFilters').hidden = !filtersActive();
   }
 
@@ -477,11 +511,14 @@
   function recordRowHtml(rec, prev, prevCalc) {
     var st = settings();
     var c = computeRecord(rec, st);
-    var html = '<tr data-rec-row="' + esc(rec.id) + '">';
+    var html = '<tr data-rec-row="' + esc(rec.id) + '"' + (rec.starred ? ' class="starred"' : '') + '>';
 
-    var hhmm = String(rec.createdAt || '').slice(11, 16) || '—';
-    html += '<td data-label="時間" class="rec-time">' + esc(hhmm) + '</td>';
-    html += '<td data-label="標籤">' + (rec.label ? '<span class="badge">' + esc(rec.label) + '</span>' : '—') + '</td>';
+    // 星號內嵌在時間欄，不另開欄位：手機版把第一格當成卡片標題，
+    // 星號若自成一欄會把標題樣式搶走。
+    var meta = starHtml('record', rec) + '<span class="t">' + esc(localTime(rec.createdAt)) + '</span>';
+    if (rec.label) meta += '<span class="badge rec-label">' + esc(rec.label) + '</span>';
+    if (rec.starred && rec.starNote) meta += '<span class="star-note">' + esc(rec.starNote) + '</span>';
+    html += '<td data-label="時間" class="rec-time">' + meta + '</td>';
 
     html += '<td class="num c-fact" data-label="股價">'
       + numWithDelta(rec.price, prev && prev.price, 'pct', fmtNum(rec.price)) + '</td>';
@@ -539,7 +576,8 @@
     var pts = groups.map(function (g, i) {
       var items = g.items.map(function (r) {
         var c = computeRecord(r, st);
-        return { implied: c.impliedStatus === 'ok' ? c.implied : null, mine: r.myCagr1_5 };
+        return { implied: c.impliedStatus === 'ok' ? c.implied : null, mine: r.myCagr1_5,
+                 starred: r.starred === true };
       });
       return { date: g.date, i: i, items: items, lead: items[0] };   // items[0] = 該日最新
     });
@@ -611,25 +649,35 @@
           var v = it[pair[0]];
           if (v === null || !isFinite(v)) return;
           var cx = x(i), cy = y(v);
-          svg += '<circle class="dot-' + pair[1] + (j > 0 ? ' alt' : '') + '" cx="' + cx.toFixed(1)
-            + '" cy="' + cy.toFixed(1) + '" r="' + (j > 0 ? 2.2 : 3) + '"/>';
-          labels.push({ x: cx, y: cy, v: v, cls: pair[1], lead: j === 0 });
+          if (it.starred) {
+            // 被標記的點：外環＋實心大點，在一堆點裡要一眼認得出來
+            svg += '<circle class="dot-star-ring" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="6.5"/>';
+          }
+          svg += '<circle class="dot-' + pair[1] + (j > 0 && !it.starred ? ' alt' : '') + '" cx="' + cx.toFixed(1)
+            + '" cy="' + cy.toFixed(1) + '" r="' + (it.starred ? 4.2 : (j > 0 ? 2.2 : 3)) + '"/>';
+          labels.push({ x: cx, y: cy, v: v, cls: pair[1], lead: j === 0, starred: it.starred });
         });
       });
     });
 
     // 數值標示：會碰撞就略過（47 筆時點距只有幾 px，不處理一定疊成一團）。
     // 左右兩端的點要改變錨點，否則會壓到 y 軸刻度、或被右邊界切掉。
-    labels.sort(function (a, b) { return (b.lead ? 1 : 0) - (a.lead ? 1 : 0); });
+    // 被標記的排最前面，而且不受碰撞略過限制——標了就一定要看得到數字。
+    labels.sort(function (a, b) {
+      return ((b.starred ? 2 : 0) + (b.lead ? 1 : 0)) - ((a.starred ? 2 : 0) + (a.lead ? 1 : 0));
+    });
     var placed = [];
     labels.forEach(function (lb) {
-      var anchor = 'middle', tx = lb.x, ty = lb.y - 8;
-      if (lb.x <= L + 20) { anchor = 'start'; tx = lb.x + 7; }
-      else if (lb.x >= W - Rt - 20) { anchor = 'end'; tx = lb.x - 7; }
-      var collide = placed.some(function (q) { return Math.abs(q.x - tx) < 34 && Math.abs(q.y - ty) < 12; });
-      if (collide) return;
+      var anchor = 'middle', tx = lb.x, ty = lb.y - (lb.starred ? 11 : 8);
+      if (lb.x <= L + 20) { anchor = 'start'; tx = lb.x + (lb.starred ? 10 : 7); }
+      else if (lb.x >= W - Rt - 20) { anchor = 'end'; tx = lb.x - (lb.starred ? 10 : 7); }
+      if (!lb.starred) {
+        var collide = placed.some(function (q) { return Math.abs(q.x - tx) < 34 && Math.abs(q.y - ty) < 12; });
+        if (collide) return;
+      }
       placed.push({ x: tx, y: ty });
-      svg += '<text class="pt-label ' + lb.cls + '" style="text-anchor:' + anchor + '" x="' + tx.toFixed(1)
+      svg += '<text class="pt-label ' + lb.cls + (lb.starred ? ' starred' : '')
+        + '" style="text-anchor:' + anchor + '" x="' + tx.toFixed(1)
         + '" y="' + ty.toFixed(1) + '">' + lb.v.toFixed(1) + '%</text>';
     });
 
@@ -641,6 +689,7 @@
       + ' aria-label="市場隱含與我估的成長率走勢">' + svg + '</svg>'
       + '<div class="trend-legend">'
       + '<span class="k c-market">市場隱含</span><span class="k c-mine">我估</span>'
+      + (recs.some(function (r) { return r.starred; }) ? '<span class="k star-k">★ 已標記</span>' : '')
       + '<span class="note">' + note + '</span>'
       + '<span class="span">' + esc(pts[0].date) + ' → ' + esc(pts[pts.length - 1].date)
       + '・' + pts.length + ' 個日期</span>'
@@ -658,16 +707,27 @@
     if (!recs.length) { selectedStockId = null; panel.hidden = true; return; }
 
     panel.hidden = false;
+
+    // 篩選只作用在表格；趨勢圖一律吃全量，否則看不到被標記的點在走勢裡的位置。
+    var shown = filters.starred ? recs.filter(function (r) { return r.starred; }) : recs;
+
+    $('detailStar').innerHTML = starHtml('stock', stock);
     $('detailTitle').textContent = stock.ticker + ' ' + stock.name
       + '・' + (stock.market === 'US' ? '美股' : '台股')
       + '・共 ' + recs.length + ' 筆'
+      + (filters.starred ? '（只看標記：' + shown.length + ' 筆）' : '')
       + (stock.tags.length ? '・' + stock.tags.join('、') : '');
     $('deleteStock').dataset.stock = stock.id;
+
+    var sn = $('detailStarNote');
+    sn.hidden = !stock.starred;
+    sn.value = stock.starNote || '';
+    sn.dataset.id = stock.id;
 
     $('trendChart').innerHTML = trendSvg(recs);
 
     var st = settings();
-    var groups = groupByDate(recs);                        // 新 → 舊
+    var groups = groupByDate(shown);                       // 新 → 舊
 
     // 差值的比較對象是「前一個日期分組的代表筆」，不是相鄰列。
     // 同一天的幾筆是平行試算，互比會跑出 -100% / +231% 這種沒有意義的數字。
@@ -677,7 +737,7 @@
       var base = baseGroup ? baseGroup.items[0] : null;    // 該日最新一筆為代表
       var baseCalc = base ? computeRecord(base, st) : null;
 
-      html += '<tr class="group-row"><td colspan="12">'
+      html += '<tr class="group-row"><td colspan="11">'
         + '<span class="g-date">' + esc(g.date) + '</span>'
         + '<span class="g-count">' + g.items.length + ' 筆</span>'
         + (g.items.length > 1 ? '<span class="g-hint">同一天的平行試算，彼此不互相比較</span>' : '')
@@ -688,11 +748,47 @@
         try { html += recordRowHtml(r, base, baseCalc); }
         catch (err) {
           console.error('這筆紀錄畫不出來', r, err);
-          html += '<tr class="row-error"><td colspan="12">這筆紀錄畫不出來：' + esc(err.message) + '</td></tr>';
+          html += '<tr class="row-error"><td colspan="11">這筆紀錄畫不出來：' + esc(err.message) + '</td></tr>';
         }
       });
     });
+    if (!groups.length) {
+      html = '<tr><td colspan="11" class="empty-rec">這一檔沒有被標記的紀錄。關掉「只看標記」就能看到全部 '
+        + recs.length + ' 筆。</td></tr>';
+    }
     $('recordBody').innerHTML = html;
+  }
+
+  // 標記後在該列就地展開輸入框，Enter 或失焦存檔，Esc 放棄。
+  function openStarNoteInput(recId) {
+    var tr = $('recordBody').querySelector('tr[data-rec-row="' + recId + '"]');
+    if (!tr) return;
+    var cellEl = tr.querySelector('.rec-time');
+    if (!cellEl || cellEl.querySelector('.star-note-edit')) return;
+
+    var rec = Store.findRecord(recId);
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'star-note-edit';
+    inp.placeholder = '為什麼標記？可留空';
+    inp.value = (rec && rec.starNote) || '';
+    cellEl.appendChild(inp);
+    inp.focus();
+
+    var done = false;
+    function save(commit) {
+      if (done) return;
+      done = true;
+      if (commit) Store.setStarNote('record', recId, inp.value);
+      render();
+    }
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); save(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); save(false); }
+      e.stopPropagation();
+    });
+    inp.addEventListener('blur', function () { save(true); });
+    inp.addEventListener('click', function (e) { e.stopPropagation(); });
   }
 
   function selectStock(id) {
@@ -957,6 +1053,13 @@
         }
         return;
       }
+      var st = e.target.closest('[data-star]');
+      if (st) {
+        e.stopPropagation();
+        Store.toggleStar(st.dataset.star, st.dataset.starId);
+        render();
+        return;
+      }
       if (e.target.closest('input, button')) return;
       var tr = e.target.closest('tr[data-stock]');
       if (tr) selectStock(tr.dataset.stock);
@@ -966,6 +1069,17 @@
 
     // 分頁表：編輯與逐筆刪除
     $('recordBody').addEventListener('click', function (e) {
+      var stBtn = e.target.closest('[data-star]');
+      if (stBtn) {
+        var item = Store.toggleStar(stBtn.dataset.star, stBtn.dataset.starId);
+        render();
+        // 剛標記起來 → 就地開一個小輸入框問原因，不想寫直接跳開即可
+        if (item && item.starred && stBtn.dataset.star === 'record') {
+          openStarNoteInput(stBtn.dataset.starId);
+        }
+        return;
+      }
+
       var ed = e.target.closest('[data-edit-rec]');
       if (ed) { enterEdit(ed.dataset.editRec); return; }
 
@@ -1013,11 +1127,22 @@
     $('filterStatus').addEventListener('change', function () { filters.status = this.value; render(); });
 
     $('clearFilters').addEventListener('click', function () {
-      filters = { text: '', market: '', status: '', tags: [] };
+      filters = defaultFilters();
       $('filterText').value = '';
       $('filterMarket').value = '';
       $('filterStatus').value = '';
+      $('filterStar').classList.remove('on');
       render();
+    });
+
+    $('filterStar').addEventListener('click', function () {
+      filters.starred = !filters.starred;
+      this.classList.toggle('on', filters.starred);
+      render();
+    });
+
+    $('detailStarNote').addEventListener('change', function () {
+      if (this.dataset.id) Store.setStarNote('stock', this.dataset.id, this.value);
     });
 
     $('tagFilters').addEventListener('click', function (e) {

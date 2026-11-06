@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="6">
+<meta name="app-build" content="7">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -132,6 +132,7 @@
   <input type="search" id="filterText" placeholder="搜尋代號或名稱">
   <select id="filterMarket"><option value="">全部市場</option><option value="TW">台股</option><option value="US">美股</option></select>
   <select id="filterStatus"><option value="">全部狀態</option><option value="held">持有</option><option value="watch">觀察中</option></select>
+  <button type="button" id="filterStar" class="tag-chip star-chip">★ 只看標記</button>
   <div id="tagFilters" class="tag-filters"></div>
 </section>
 
@@ -169,7 +170,9 @@
 <!-- ⑤ 分頁表：選取某一檔後顯示它的所有紀錄與走勢 -->
 <section id="detailPanel" class="panel detail" hidden>
   <div class="detail-head">
+    <span id="detailStar"></span>
     <h2 id="detailTitle" class="sec-title"></h2>
+    <input type="text" id="detailStarNote" class="star-note-input" placeholder="為什麼標記這一檔？（可留空）" hidden>
     <div class="detail-actions">
       <button type="button" id="detailClose" class="pill ghost">收起</button>
       <button type="button" id="deleteStock" class="pill danger">刪除整檔</button>
@@ -182,8 +185,7 @@
     <table id="recordTable">
       <thead>
         <tr>
-          <th>時間</th>
-          <th>標籤</th>
+          <th>時間・標籤</th>
           <th class="num c-fact">股價</th>
           <th class="num c-fact">EPS</th>
           <th class="num c-mine">我估 1-5 年</th>
