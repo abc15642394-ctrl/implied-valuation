@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 7;            // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 8;            // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -111,7 +111,9 @@
   function statusMessage(status, eps, price) {
     if (status === 'invalid') {
       if (!(eps > 0)) return 'EPS ≤ 0，不適用';
-      if (price !== undefined && !(price > 0)) return '股價須 > 0';
+      // 沒填股價不是錯誤，只是這一筆沒有要反推市場隱含值。
+      if (price === null || price === undefined) return '未填股價';
+      if (!(price > 0)) return '股價須 > 0';
       return '輸入不完整';
     }
     if (status === 'above') return '超出上限';
@@ -871,13 +873,26 @@
     var ticker = $('newTicker').value.trim();
 
     if (!ticker) { showAddMsg('請先在上方「股票資料」填代號，才知道這筆要存成哪一檔。', true); $('newTicker').focus(); return; }
-    // 股價留空以前會被偷偷存成 0，變成一筆永遠算不出東西的紀錄。
-    if (v.price === null || v.price <= 0) {
-      showAddMsg('請填股價（要大於 0），否則這筆紀錄算不出任何東西。', true);
+    // 一筆紀錄只要算得出「市場隱含」或「合理價」其中之一就有價值：
+    //   市場隱含 需要 股價 > 0 且 EPS > 0
+    //   合理價   需要 EPS > 0 且 填了我估的 1-5 年成長率
+    // 所以股價是可以留空的——那就是「只用自己的假設算合理價」。
+    // 要擋的只有「打了一個不合理的股價」與「兩邊都算不出來」。
+    if (v.eps === null || v.eps <= 0) {
+      showAddMsg('請填 EPS（要大於 0），這是所有計算的起點。', true);
+      $('calcEps').focus();
+      return;
+    }
+    if (v.price !== null && v.price <= 0) {
+      showAddMsg('股價要大於 0。如果你只是要算合理價，把股價留空即可。', true);
       $('calcPrice').focus();
       return;
     }
-    if (v.eps === null) { showAddMsg('請填 EPS，否則這筆紀錄算不出任何東西。', true); $('calcEps').focus(); return; }
+    if (v.price === null && v.g15 === null) {
+      showAddMsg('股價和 1-5 年成長率至少要填一個：填股價會反推市場隱含值，填成長率會算出合理價。', true);
+      $('calcPrice').focus();
+      return;
+    }
 
     // 編輯模式：更新那一筆，不新增
     if (editingRecordId !== null) {
@@ -891,7 +906,7 @@
         Store.updateRecord(editing.id, {
           date: $('newDate').value || editing.date,
           label: $('newLabel').value,
-          price: v.price,
+          price: v.price,      // 可為 null
           eps: v.eps,
           myCagr1_5: v.g15,
           cagr6_10: v.g610 === null ? 0 : v.g610,
@@ -918,7 +933,7 @@
     Store.addRecord(stock.id, {
       date: $('newDate').value || Store.today(),
       label: $('newLabel').value,
-      price: v.price,
+      price: v.price,          // 可為 null＝這一筆沒有記股價
       eps: v.eps,
       myCagr1_5: v.g15,                      // 留空就是 null＝未估，不是 0%
       cagr6_10: v.g610 === null ? 0 : v.g610,
@@ -957,22 +972,32 @@
 
   // ---- 事件 ----
 
+  function rejectEdit(inp, rec, field, why) {
+    inp.value = inputValue(rec[field]);
+    inp.classList.add('rejected');
+    inp.title = why;
+    setTimeout(function () { inp.classList.remove('rejected'); }, 1200);
+  }
+
   function applyEdit(inp) {
     var field = inp.dataset.field;
     var rec = Store.findRecord(inp.dataset.rec);
     if (!rec) return null;
 
     var patch = {};
-    if (field === 'myCagr1_5') {
-      patch[field] = numOrNull(inp.value);                 // 清空＝改回「未估」
+    // 這兩個欄位清空是有意義的：我估＝未估、股價＝這一筆沒記股價（只算合理價）。
+    if (field === 'myCagr1_5' || field === 'price') {
+      var nv = numOrNull(inp.value);
+      if (nv !== null && field === 'price' && nv <= 0) {
+        rejectEdit(inp, rec, field, '股價要大於 0；只算合理價的話把它清空即可');
+        return null;
+      }
+      inp.title = '';
+      patch[field] = nv;
     } else {
       var v = numOrNull(inp.value);
-      // 股價與 EPS 必須是正數，否則那一列的計算全部失效卻沒有任何解釋。
-      if (v === null || ((field === 'price' || field === 'eps') && v <= 0)) {
-        inp.value = inputValue(rec[field]);
-        inp.classList.add('rejected');
-        inp.title = field === 'price' ? '股價必須大於 0' : (field === 'eps' ? 'EPS 必須大於 0' : '請輸入數字');
-        setTimeout(function () { inp.classList.remove('rejected'); }, 1200);
+      if (v === null || (field === 'eps' && v <= 0)) {
+        rejectEdit(inp, rec, field, field === 'eps' ? 'EPS 必須大於 0' : '請輸入數字');
         return null;
       }
       inp.title = '';

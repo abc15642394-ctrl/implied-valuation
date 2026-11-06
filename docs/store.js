@@ -92,7 +92,10 @@
       stockId: stockId,
       date: normalizeDate(raw.date || raw.updatedAt),
       label: String(raw.label || '').trim(),
-      price: num(raw.price, 0),
+      // 股價可以留空：「只用自己的成長率算合理價」是完全合理的用法，
+      // 那種紀錄算不出市場隱含，但合理價與永續佔比都算得出來。
+      // 舊資料裡存成 0 的，是先前把空值硬塞 0 的產物——股價不可能真的是 0，一律視為未填。
+      price: (function (v) { var n = numOrNull(v); return (n === null || n === 0) ? null : n; })(raw.price),
       eps: num(raw.eps, 0),
       myCagr1_5: numOrNull(raw.myCagr1_5),
       cagr6_10: num(raw.cagr6_10, defaults.defaultCagr6_10),
