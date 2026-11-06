@@ -325,8 +325,41 @@ td input:focus { background: var(--surface); border-color: var(--brand-2); }
 .badge.held { color: var(--good); background: var(--good-bg); border-color: transparent; }
 .badge.stale { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
 
-.row-tags { white-space: normal; max-width: 180px; }
-.row-tags .badge { margin: 1px 2px 1px 0; }
+/* 名稱沒有上限的話會把整張表撐爆（實測單一名稱吃掉 424px），
+   連帶把其他欄擠到換行、列高暴增到 480px。截斷，完整名稱放 title。 */
+.ellip {
+  display: inline-block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.mkt {
+  font-size: .68rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 3px;
+  vertical-align: middle;
+}
+
+.count-pill {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: .76rem;
+  font-weight: 600;
+}
+
+tbody tr[data-stock] { cursor: pointer; }
+tbody tr[data-stock]:hover { background: var(--bg); }
+tbody tr.selected { background: var(--good-bg); }
+tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
 
 .del {
   background: none;
@@ -805,4 +838,179 @@ tr.row-error td {
   .res-row > span { flex: 1 1 100%; }
   .status-bar { flex-wrap: wrap; }
   .fatal { font-size: .85rem; }
+}
+
+/* ---- 分頁表：該檔的所有紀錄與走勢 ---- */
+
+.detail { border-left: 4px solid var(--c-signal); }
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.detail-head .sec-title { margin: 0; color: var(--text); font-size: 1.02rem; }
+.detail-actions { display: flex; gap: 8px; }
+
+button.danger { background: var(--bad); }
+button.pill.danger { background: var(--bad); color: #fff; border: none; }
+
+/* 迷你趨勢圖 */
+.trend {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px 8px;
+  margin-bottom: 14px;
+}
+
+.trend-svg {
+  display: block;
+  width: 100%;
+  height: 90px;
+  overflow: visible;
+}
+
+.trend-svg polyline {
+  fill: none;
+  stroke-width: 1.1;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.trend-svg .line-market { stroke: var(--c-market); }
+.trend-svg .line-mine { stroke: var(--c-mine); stroke-dasharray: 3 2; }
+.trend-svg .line-market-dot { fill: var(--c-market); }
+.trend-svg .line-mine-dot { fill: var(--c-mine); }
+
+.trend-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: .76rem;
+  color: var(--muted);
+}
+
+.trend-legend .k { font-weight: 600; }
+.trend-legend .k::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  border-top: 2px solid currentColor;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.trend-legend .k.c-mine::before { border-top-style: dashed; }
+.trend-legend .range, .trend-legend .span { margin-left: auto; }
+.trend-legend .span { margin-left: 0; }
+
+/* 紀錄表 */
+.detail-table-wrap { overflow-x: auto; }
+
+#recordTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+  white-space: nowrap;
+}
+
+#recordTable th, #recordTable td {
+  padding: 8px 7px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+#recordTable thead th {
+  color: var(--muted);
+  font-size: .74rem;
+  font-weight: 600;
+}
+
+#recordTable th.num, #recordTable td.num { text-align: right; }
+#recordTable tbody tr:last-child td { border-bottom: none; }
+#recordTable tbody tr:hover { background: var(--bg); }
+
+#recordTable .val { font-variant-numeric: tabular-nums; }
+
+.delta {
+  display: block;
+  font-size: .7rem;
+  font-weight: 600;
+  margin-top: 1px;
+  white-space: nowrap;   /* 否則「持平」會被拆成兩行 */
+}
+
+.delta.up { color: var(--good); }
+.delta.down { color: var(--bad); }
+.delta.flat { color: var(--muted); font-weight: 500; }
+
+.rec-note {
+  white-space: normal;
+  max-width: 180px;
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+/* ---- 手機 ---- */
+
+@media (max-width: 768px) {
+  .ellip { max-width: none; }
+
+  .detail-head { align-items: flex-start; }
+  .trend-svg { height: 110px; }
+  .trend-legend .range, .trend-legend .span { margin-left: 0; }
+
+  .detail-table-wrap { overflow: visible; }
+  #recordTable, #recordTable tbody { display: block; width: 100%; }
+  #recordTable thead { display: none; }
+
+  #recordTable tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 10px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+
+  #recordTable tbody td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 0;
+    border: none;
+    white-space: normal;
+    text-align: left;
+  }
+
+  #recordTable tbody td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: .72rem;
+    flex: 0 0 auto;
+  }
+
+  #recordTable tbody td:first-child,
+  #recordTable .rec-note,
+  #recordTable tbody td:last-child { grid-column: 1 / -1; }
+
+  #recordTable tbody td:first-child { font-weight: 700; font-size: .95rem; }
+  #recordTable tbody td:first-child::before { display: none; }
+  #recordTable tbody td:last-child { justify-content: flex-end; }
+  #recordTable tbody td:last-child::before { display: none; }
+  #recordTable .rec-note { max-width: none; }
+  #recordTable .delta { display: inline-block; margin: 0 0 0 6px; }
+  #recordTable .val { display: inline-block; }
 }

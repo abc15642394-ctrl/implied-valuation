@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="4">
+<meta name="app-build" content="5">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -37,7 +37,7 @@
 
 <p id="storageWarn" class="error" hidden></p>
 
-<!-- ① 股票資料 -->
+<!-- ① 股票資料（這一檔的身分，不隨每次估值改變） -->
 <section class="panel">
   <h2 class="sec-title">股票資料</h2>
   <div class="calc-grid">
@@ -53,16 +53,13 @@
     <label class="g-id">狀態
       <span class="field"><select id="newStatus"><option value="watch">觀察中</option><option value="held">持有</option></select></span>
     </label>
-    <label class="g-id">標籤（逗號分隔）
+    <label class="g-id wide">分類標籤（逗號分隔）
       <span class="field"><input type="text" id="newTags" placeholder="AI 伺服器, 晶圓代工"></span>
-    </label>
-    <label class="g-id">備註
-      <span class="field"><input type="text" id="newNote" placeholder="這 EPS 用 2026 市場共識"></span>
     </label>
   </div>
 </section>
 
-<!-- ② 估值計算器 -->
+<!-- ② 估值計算器（這一筆的輸入） -->
 <section class="panel calculator">
   <h2 class="calc-title">DCF 股票估值計算器</h2>
 
@@ -108,9 +105,20 @@
   </div>
   <p id="calcMsg" class="hint"></p>
 
-  <!-- ④ 加入追蹤 -->
+  <!-- ④ 加入追蹤（這一筆的標示） -->
   <div class="track-box">
-    <button type="button" id="addBtn" class="primary">加入追蹤</button>
+    <div class="calc-grid">
+      <label class="g-id">紀錄日期
+        <span class="field"><input type="date" id="newDate"></span>
+      </label>
+      <label class="g-id">紀錄標籤（選填）
+        <span class="field"><input type="text" id="newLabel" placeholder="2025Q3 法說後"></span>
+      </label>
+      <label class="g-id wide">這一筆的備註
+        <span class="field"><input type="text" id="newNote" placeholder="這 EPS 用 2026 市場共識"></span>
+      </label>
+    </div>
+    <button type="button" id="addBtn" class="primary">加入追蹤（新增一筆紀錄）</button>
     <p id="addMsg" class="notice" hidden></p>
   </div>
 </section>
@@ -136,19 +144,16 @@
       <tr>
         <th data-sort="ticker">代號</th>
         <th data-sort="name">名稱</th>
-        <th data-sort="market">市場</th>
         <th data-sort="price" class="num c-fact">現價</th>
         <th data-sort="eps" class="num c-fact">EPS</th>
         <th data-sort="myCagr1_5" class="num c-mine">我估 1-5 年</th>
-        <th data-sort="cagr6_10" class="num c-mine">6-10 年</th>
         <th data-sort="implied" class="num c-market">市場隱含</th>
         <th data-sort="gap" class="num c-signal">落差</th>
         <th data-sort="fairValue" class="num c-mine">合理價</th>
         <th data-sort="upside" class="num c-mine">上漲空間</th>
-        <th data-sort="tvShare" class="num c-warn">永續佔比</th>
-        <th data-sort="tags">標籤</th>
+        <th data-sort="count" class="num">筆數</th>
         <th data-sort="status">狀態</th>
-        <th data-sort="updatedAt">更新</th>
+        <th data-sort="date">更新</th>
         <th></th>
       </tr>
     </thead>
@@ -156,13 +161,49 @@
   </table>
 </div>
 
+<!-- ⑤ 分頁表：選取某一檔後顯示它的所有紀錄與走勢 -->
+<section id="detailPanel" class="panel detail" hidden>
+  <div class="detail-head">
+    <h2 id="detailTitle" class="sec-title"></h2>
+    <div class="detail-actions">
+      <button type="button" id="detailClose" class="pill ghost">收起</button>
+      <button type="button" id="deleteStock" class="pill danger">刪除整檔</button>
+    </div>
+  </div>
+
+  <div id="trendChart" class="trend"></div>
+
+  <div class="detail-table-wrap">
+    <table id="recordTable">
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th>標籤</th>
+          <th class="num c-fact">股價</th>
+          <th class="num c-fact">EPS</th>
+          <th class="num c-mine">我估 1-5 年</th>
+          <th class="num c-mine">6-10 年</th>
+          <th class="num c-market">市場隱含</th>
+          <th class="num c-signal">落差</th>
+          <th class="num c-mine">合理價</th>
+          <th class="num c-warn">永續佔比</th>
+          <th>備註</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="recordBody"></tbody>
+    </table>
+  </div>
+  <p class="hint">每個數字下方的小字，是跟「前一筆（較舊）」相比的變化。</p>
+</section>
+
 <p class="footnote">
   <span class="key c-fact">事實</span>股價與 EPS 是你抄進來的。
   <span class="key c-market">市場</span>隱含成長率是從現價反推的。
   <span class="key c-mine">我估</span>合理價與上漲空間來自你填的成長率。
   <span class="key c-signal">訊號</span>落差＝市場隱含 − 我估，負值代表市場的要求比你低。
   <span class="key c-warn">警示</span>永續佔比越高，估值越是靠第 10 年後的終值假設撐著。<br>
-  折現率與永續成長率所有股票共用，改了整張表立刻重算。
+  主表顯示每檔「最新一筆」；點一列即可展開該檔的所有紀錄與走勢。折現率與永續成長率所有股票共用。
 </p>
 
 </div><!-- /.shell -->
