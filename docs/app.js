@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 5;            // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 6;            // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -14,6 +14,7 @@
   var filters = { text: '', market: '', status: '', tags: [] };
   var helperTarget = null;  // { kind: 'calc' } 或 { kind: 'record', id: ... }
   var selectedStockId = null;
+  var editingRecordId = null;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -296,8 +297,11 @@
   }
 
   function editCell(rec, field) {
+    // 主表顯示的是該檔「最新一筆」，就地編輯動到的也只有那一筆——
+    // 累積多筆之後很容易誤以為是在改整檔，所以把它寫在 title 上。
+    var hint = '編輯的是最新一筆（' + rec.date + '）';
     return '<td class="num ' + (COL_TONE[field] || '') + '" data-col="' + field + '" data-label="' + LABELS[field] + '">'
-      + '<input type="number" step="any" inputmode="decimal" data-rec="' + rec.id
+      + '<input type="number" step="any" inputmode="decimal" title="' + esc(hint) + '" data-rec="' + rec.id
       + '" data-field="' + field + '" value="' + inputValue(rec[field]) + '"></td>';
   }
 
@@ -475,7 +479,8 @@
     var c = computeRecord(rec, st);
     var html = '<tr data-rec-row="' + esc(rec.id) + '">';
 
-    html += '<td data-label="日期">' + esc(rec.date) + '</td>';
+    var hhmm = String(rec.createdAt || '').slice(11, 16) || '—';
+    html += '<td data-label="時間" class="rec-time">' + esc(hhmm) + '</td>';
     html += '<td data-label="標籤">' + (rec.label ? '<span class="badge">' + esc(rec.label) + '</span>' : '—') + '</td>';
 
     html += '<td class="num c-fact" data-label="股價">'
@@ -494,60 +499,151 @@
       + numWithDelta(c.fairValue, prevCalc && prevCalc.fairValue, 'pct', fmtNum(c.fairValue)) + '</td>';
     html += '<td class="num c-warn" data-label="永續佔比">' + tvHtml(c) + '</td>';
     html += '<td class="rec-note" data-label="備註">' + (rec.note ? esc(rec.note) : '—') + '</td>';
-    html += '<td data-label=""><button type="button" class="del" data-del-rec="' + esc(rec.id)
-      + '" title="刪除這一筆紀錄">✕</button></td>';
+    html += '<td data-label="" class="rec-actions">'
+      + '<button type="button" class="pill" data-edit-rec="' + esc(rec.id) + '" title="載回上方計算器修改">編輯</button>'
+      + '<button type="button" class="del" data-del-rec="' + esc(rec.id) + '" title="刪除這一筆紀錄">✕</button>'
+      + '</td>';
 
     return html + '</tr>';
   }
 
-  // 手寫 inline SVG：市場隱含 vs 我估，兩條線的開口就是落差。
+  // 取「好看」的刻度間隔
+  function niceStep(range, target) {
+    var raw = range / Math.max(1, target);
+    var mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+    var norm = raw / mag;
+    var step = norm <= 1 ? 1 : (norm <= 2 ? 2 : (norm <= 5 ? 5 : 10));
+    return step * mag;
+  }
+
+  // 依日期把紀錄分組（新 → 舊），組內也是新 → 舊
+  function groupByDate(recs) {
+    var order = [];
+    var map = {};
+    recs.forEach(function (r) {
+      if (!map[r.date]) { map[r.date] = []; order.push(r.date); }
+      map[r.date].push(r);
+    });
+    return order.map(function (d) { return { date: d, items: map[d] }; });
+  }
+
+  // 手寫 inline SVG。重點：
+  //  - 不能用 preserveAspectRatio="none"，否則加上去的文字會被橫向扯變形
+  //  - x 軸用「不重複日期」等距排，不是真實時間距離。實測真實時間軸下，
+  //    一筆 2020 年的紀錄會把最近三筆擠成整張圖的 0.08% 寬，等於看不見。
+  //  - 同一天的多筆畫在同一個 x 上（平行試算），折線只連每日代表筆。
   function trendSvg(recs) {
     var st = settings();
-    var pts = recs.slice().reverse().map(function (r) {     // 舊 → 新
-      var c = computeRecord(r, st);
-      return { date: r.date, implied: c.impliedStatus === 'ok' ? c.implied : null, mine: r.myCagr1_5 };
+    var groups = groupByDate(recs).slice().reverse();   // 舊 → 新
+
+    var pts = groups.map(function (g, i) {
+      var items = g.items.map(function (r) {
+        var c = computeRecord(r, st);
+        return { implied: c.impliedStatus === 'ok' ? c.implied : null, mine: r.myCagr1_5 };
+      });
+      return { date: g.date, i: i, items: items, lead: items[0] };   // items[0] = 該日最新
     });
 
     var vals = [];
     pts.forEach(function (p) {
-      if (p.implied !== null && isFinite(p.implied)) vals.push(p.implied);
-      if (p.mine !== null && isFinite(p.mine)) vals.push(p.mine);
+      p.items.forEach(function (it) {
+        if (it.implied !== null && isFinite(it.implied)) vals.push(it.implied);
+        if (it.mine !== null && isFinite(it.mine)) vals.push(it.mine);
+      });
     });
-    if (!vals.length) return '<p class="hint">這些紀錄還算不出可畫的成長率。</p>';
+    if (!vals.length) return '<p class="hint">這些紀錄還算不出可畫的成長率，所以畫不出走勢。</p>';
 
-    var W = 100, H = 38, PAD = 3;
+    var mineCount = 0, total = 0;
+    recs.forEach(function (r) { total++; if (r.myCagr1_5 !== null && isFinite(r.myCagr1_5)) mineCount++; });
+
+    var W = 620, H = 240, L = 54, Rt = 16, T = 18, B = 40;
+    var plotW = W - L - Rt, plotH = H - T - B;
+
     var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-    if (hi - lo < 1) { hi += 0.5; lo -= 0.5; }
-    var x = function (i) { return pts.length === 1 ? W / 2 : PAD + i * (W - 2 * PAD) / (pts.length - 1); };
-    var y = function (v) { return H - PAD - (v - lo) / (hi - lo) * (H - 2 * PAD); };
+    if (hi - lo < 1) { hi += 1; lo -= 1; }
+    var step = niceStep(hi - lo, 4);
+    lo = Math.floor(lo / step) * step;
+    hi = Math.ceil(hi / step) * step;
 
-    // 有缺值就斷線，不要硬連過去
-    function series(key) {
+    var x = function (i) { return pts.length === 1 ? L + plotW / 2 : L + i * plotW / (pts.length - 1); };
+    var y = function (v) { return T + plotH - (v - lo) / (hi - lo) * plotH; };
+
+    var svg = '';
+
+    // y 軸格線與刻度
+    for (var v = lo; v <= hi + 1e-9; v += step) {
+      var yy = y(v);
+      var zero = Math.abs(v) < 1e-9;
+      svg += '<line class="grid' + (zero ? ' zero' : '') + '" x1="' + L + '" y1="' + yy.toFixed(1)
+        + '" x2="' + (W - Rt) + '" y2="' + yy.toFixed(1) + '"/>';
+      svg += '<text class="tick-y" x="' + (L - 7) + '" y="' + (yy + 3.5).toFixed(1) + '">'
+        + v.toFixed(Math.abs(step) < 1 ? 1 : 0) + '%</text>';
+    }
+
+    // x 軸日期（太擠就隔著標）
+    var everyN = Math.ceil(pts.length / 8);
+    pts.forEach(function (p, i) {
+      if (i % everyN !== 0 && i !== pts.length - 1) return;
+      svg += '<text class="tick-x" x="' + x(i).toFixed(1) + '" y="' + (H - B + 16) + '">'
+        + esc(p.date.slice(5)) + '</text>';
+    });
+
+    // 折線只連每日代表筆；缺值就斷線
+    function leadLine(key, cls) {
       var segs = [], cur = [];
       pts.forEach(function (p, i) {
-        var v = p[key];
-        if (v === null || !isFinite(v)) { if (cur.length) segs.push(cur); cur = []; return; }
-        cur.push(x(i).toFixed(2) + ',' + y(v).toFixed(2));
+        var v = p.lead[key];
+        if (v === null || !isFinite(v)) { if (cur.length > 1) segs.push(cur); cur = []; return; }
+        cur.push(x(i).toFixed(1) + ',' + y(v).toFixed(1));
       });
-      if (cur.length) segs.push(cur);
-      return segs;
-    }
-
-    function draw(key, cls) {
-      return series(key).map(function (seg) {
-        return seg.length === 1
-          ? '<circle class="' + cls + '-dot" cx="' + seg[0].split(',')[0] + '" cy="' + seg[0].split(',')[1] + '" r="1.4"/>'
-          : '<polyline class="' + cls + '" points="' + seg.join(' ') + '"/>';
+      if (cur.length > 1) segs.push(cur);
+      return segs.map(function (sg) {
+        return '<polyline class="' + cls + '" points="' + sg.join(' ') + '"/>';
       }).join('');
     }
+    svg += leadLine('implied', 'line-market') + leadLine('mine', 'line-mine');
 
-    return '<svg class="trend-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img"'
-      + ' aria-label="市場隱含與我估的成長率走勢">'
-      + draw('implied', 'line-market') + draw('mine', 'line-mine') + '</svg>'
+    // 資料點：同一天的多筆疊在同一個 x，非代表筆畫淡一點
+    var labels = [];
+    pts.forEach(function (p, i) {
+      p.items.forEach(function (it, j) {
+        [['implied', 'market'], ['mine', 'mine']].forEach(function (pair) {
+          var v = it[pair[0]];
+          if (v === null || !isFinite(v)) return;
+          var cx = x(i), cy = y(v);
+          svg += '<circle class="dot-' + pair[1] + (j > 0 ? ' alt' : '') + '" cx="' + cx.toFixed(1)
+            + '" cy="' + cy.toFixed(1) + '" r="' + (j > 0 ? 2.2 : 3) + '"/>';
+          labels.push({ x: cx, y: cy, v: v, cls: pair[1], lead: j === 0 });
+        });
+      });
+    });
+
+    // 數值標示：會碰撞就略過（47 筆時點距只有幾 px，不處理一定疊成一團）。
+    // 左右兩端的點要改變錨點，否則會壓到 y 軸刻度、或被右邊界切掉。
+    labels.sort(function (a, b) { return (b.lead ? 1 : 0) - (a.lead ? 1 : 0); });
+    var placed = [];
+    labels.forEach(function (lb) {
+      var anchor = 'middle', tx = lb.x, ty = lb.y - 8;
+      if (lb.x <= L + 20) { anchor = 'start'; tx = lb.x + 7; }
+      else if (lb.x >= W - Rt - 20) { anchor = 'end'; tx = lb.x - 7; }
+      var collide = placed.some(function (q) { return Math.abs(q.x - tx) < 34 && Math.abs(q.y - ty) < 12; });
+      if (collide) return;
+      placed.push({ x: tx, y: ty });
+      svg += '<text class="pt-label ' + lb.cls + '" style="text-anchor:' + anchor + '" x="' + tx.toFixed(1)
+        + '" y="' + ty.toFixed(1) + '">' + lb.v.toFixed(1) + '%</text>';
+    });
+
+    var note = mineCount === 0
+      ? '（沒有任何一筆填了「我估」，所以只有市場隱含這條線）'
+      : (mineCount < total ? '（' + total + ' 筆中有 ' + mineCount + ' 筆填了「我估」）' : '');
+
+    return '<svg class="trend-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
+      + ' aria-label="市場隱含與我估的成長率走勢">' + svg + '</svg>'
       + '<div class="trend-legend">'
       + '<span class="k c-market">市場隱含</span><span class="k c-mine">我估</span>'
-      + '<span class="range">' + fmtPct(lo, 1) + ' ～ ' + fmtPct(hi, 1) + '</span>'
-      + '<span class="span">' + esc(pts[0].date) + ' → ' + esc(pts[pts.length - 1].date) + '</span>'
+      + '<span class="note">' + note + '</span>'
+      + '<span class="span">' + esc(pts[0].date) + ' → ' + esc(pts[pts.length - 1].date)
+      + '・' + pts.length + ' 個日期</span>'
       + '</div>';
   }
 
@@ -571,22 +667,97 @@
     $('trendChart').innerHTML = trendSvg(recs);
 
     var st = settings();
-    $('recordBody').innerHTML = recs.map(function (r, i) {
-      var prev = recs[i + 1] || null;                      // 下一個索引是「更舊」的那筆
-      var prevCalc = prev ? computeRecord(prev, st) : null;
-      try { return recordRowHtml(r, prev, prevCalc); }
-      catch (err) {
-        console.error('這筆紀錄畫不出來', r, err);
-        return '<tr class="row-error"><td colspan="12">這筆紀錄畫不出來：' + esc(err.message) + '</td></tr>';
-      }
-    }).join('');
+    var groups = groupByDate(recs);                        // 新 → 舊
+
+    // 差值的比較對象是「前一個日期分組的代表筆」，不是相鄰列。
+    // 同一天的幾筆是平行試算，互比會跑出 -100% / +231% 這種沒有意義的數字。
+    var html = '';
+    groups.forEach(function (g, gi) {
+      var baseGroup = groups[gi + 1] || null;              // 下一組＝更舊的日期
+      var base = baseGroup ? baseGroup.items[0] : null;    // 該日最新一筆為代表
+      var baseCalc = base ? computeRecord(base, st) : null;
+
+      html += '<tr class="group-row"><td colspan="12">'
+        + '<span class="g-date">' + esc(g.date) + '</span>'
+        + '<span class="g-count">' + g.items.length + ' 筆</span>'
+        + (g.items.length > 1 ? '<span class="g-hint">同一天的平行試算，彼此不互相比較</span>' : '')
+        + (base ? '<span class="g-base">差值基準：' + esc(base.date) + '</span>' : '<span class="g-base">最早一組，沒有可比的前一次</span>')
+        + '</td></tr>';
+
+      g.items.forEach(function (r) {
+        try { html += recordRowHtml(r, base, baseCalc); }
+        catch (err) {
+          console.error('這筆紀錄畫不出來', r, err);
+          html += '<tr class="row-error"><td colspan="12">這筆紀錄畫不出來：' + esc(err.message) + '</td></tr>';
+        }
+      });
+    });
+    $('recordBody').innerHTML = html;
   }
 
   function selectStock(id) {
+    if (editingRecordId !== null) {
+      var ed = Store.findRecord(editingRecordId);
+      if (!ed || ed.stockId !== id) { exitEdit(); recalcCalculator(); }
+    }
     selectedStockId = id;
     render();
     var panel = $('detailPanel');
     if (!panel.hidden) panel.scrollIntoView({ block: 'nearest' });
+  }
+
+  // ---- 編輯模式 ----
+
+  function enterEdit(recId) {
+    var rec = Store.findRecord(recId);
+    if (!rec) return;
+    var stock = Store.findStock(rec.stockId);
+    if (!stock) return;
+
+    editingRecordId = recId;
+
+    // 股票層
+    $('newTicker').value = stock.ticker;
+    $('newName').value = stock.name;
+    $('newMarket').value = stock.market;
+    $('newStatus').value = stock.status;
+    $('newTags').value = stock.tags.join(', ');
+    // 紀錄層
+    $('calcPrice').value = inputValue(rec.price);
+    $('calcEps').value = inputValue(rec.eps);
+    $('calcG15').value = rec.myCagr1_5 === null ? '' : rec.myCagr1_5;
+    $('calcG610').value = inputValue(rec.cagr6_10);
+    $('newDate').value = rec.date;
+    $('newLabel').value = rec.label;
+    $('newNote').value = rec.note;
+
+    // 代號與市場決定這筆屬於哪一檔，編輯時鎖住：
+    // 允許改會變成「把紀錄搬到另一檔」這種模稜兩可的操作，容易弄壞資料。
+    $('newTicker').readOnly = true;
+    $('newMarket').disabled = true;
+    $('newTicker').title = $('newMarket').title = '編輯紀錄時不能換股票。要搬到別檔請刪掉重加。';
+
+    $('addBtn').textContent = '更新這一筆';
+    $('editBannerText').textContent = '正在編輯 ' + stock.ticker + ' 的 ' + rec.date + ' 這一筆'
+      + (rec.label ? '（' + rec.label + '）' : '');
+    $('editBanner').hidden = false;
+    showAddMsg('');
+
+    recalcCalculator();
+    $('editBanner').scrollIntoView({ block: 'center' });
+  }
+
+  function exitEdit() {
+    if (editingRecordId === null) return;
+    editingRecordId = null;
+    $('newTicker').readOnly = false;
+    $('newMarket').disabled = false;
+    $('newTicker').title = $('newMarket').title = '';
+    $('addBtn').textContent = '加入追蹤（新增一筆紀錄）';
+    $('editBanner').hidden = true;
+    $('newLabel').value = '';
+    $('newNote').value = '';
+    $('newDate').value = Store.today();
   }
 
   // ---- 加入追蹤 ----
@@ -604,7 +775,41 @@
     var ticker = $('newTicker').value.trim();
 
     if (!ticker) { showAddMsg('請先在上方「股票資料」填代號，才知道這筆要存成哪一檔。', true); $('newTicker').focus(); return; }
-    if (v.price === null && v.eps === null) { showAddMsg('至少要有股價或 EPS 才有東西可以存。', true); return; }
+    // 股價留空以前會被偷偷存成 0，變成一筆永遠算不出東西的紀錄。
+    if (v.price === null || v.price <= 0) {
+      showAddMsg('請填股價（要大於 0），否則這筆紀錄算不出任何東西。', true);
+      $('calcPrice').focus();
+      return;
+    }
+    if (v.eps === null) { showAddMsg('請填 EPS，否則這筆紀錄算不出任何東西。', true); $('calcEps').focus(); return; }
+
+    // 編輯模式：更新那一筆，不新增
+    if (editingRecordId !== null) {
+      var editing = Store.findRecord(editingRecordId);
+      if (editing) {
+        Store.updateStock(editing.stockId, {
+          name: $('newName').value,
+          status: $('newStatus').value,
+          tags: $('newTags').value.split(',').map(function (t) { return t.trim(); }).filter(Boolean)
+        });
+        Store.updateRecord(editing.id, {
+          date: $('newDate').value || editing.date,
+          label: $('newLabel').value,
+          price: v.price,
+          eps: v.eps,
+          myCagr1_5: v.g15,
+          cagr6_10: v.g610 === null ? 0 : v.g610,
+          note: $('newNote').value
+        });
+        var sid = editing.stockId;
+        exitEdit();
+        selectedStockId = sid;
+        render();
+        showAddMsg('已更新這一筆。');
+        return;
+      }
+      exitEdit();
+    }
 
     var stock = Store.upsertStock({
       ticker: ticker,
@@ -617,8 +822,8 @@
     Store.addRecord(stock.id, {
       date: $('newDate').value || Store.today(),
       label: $('newLabel').value,
-      price: v.price === null ? 0 : v.price,
-      eps: v.eps === null ? 0 : v.eps,
+      price: v.price,
+      eps: v.eps,
       myCagr1_5: v.g15,                      // 留空就是 null＝未估，不是 0%
       cagr6_10: v.g610 === null ? 0 : v.g610,
       note: $('newNote').value
@@ -745,6 +950,7 @@
         if (!s) return;
         var n = Store.countOf(s.id);
         if (confirm('刪除 ' + (s.ticker || '這一檔') + '？連同它的 ' + n + ' 筆紀錄都會一起刪掉。')) {
+          exitEdit();
           Store.removeStock(s.id);
           if (selectedStockId === s.id) selectedStockId = null;
           render();
@@ -756,8 +962,13 @@
       if (tr) selectStock(tr.dataset.stock);
     });
 
-    // 分頁表：逐筆刪除
+    $('cancelEdit').addEventListener('click', function () { exitEdit(); recalcCalculator(); });
+
+    // 分頁表：編輯與逐筆刪除
     $('recordBody').addEventListener('click', function (e) {
+      var ed = e.target.closest('[data-edit-rec]');
+      if (ed) { enterEdit(ed.dataset.editRec); return; }
+
       var del = e.target.closest('[data-del-rec]');
       if (!del) return;
       var rec = Store.findRecord(del.dataset.delRec);
@@ -767,18 +978,22 @@
         ? '這是這檔股票最後一筆紀錄，刪掉之後整檔也會從清單消失。要刪嗎？'
         : '刪除 ' + rec.date + ' 這一筆紀錄？';
       if (!confirm(msg)) return;
+      if (editingRecordId === rec.id) exitEdit();
       var r = Store.removeRecord(rec.id);
       if (r.removedStock) selectedStockId = null;
       render();
     });
 
-    $('detailClose').addEventListener('click', function () { selectedStockId = null; render(); });
+    $('detailClose').addEventListener('click', function () {
+      exitEdit(); recalcCalculator(); selectedStockId = null; render();
+    });
 
     $('deleteStock').addEventListener('click', function () {
       var s = Store.findStock(this.dataset.stock);
       if (!s) return;
       var n = Store.countOf(s.id);
       if (!confirm('刪除 ' + s.ticker + '？連同它的 ' + n + ' 筆紀錄都會一起刪掉。')) return;
+      exitEdit();
       Store.removeStock(s.id);
       selectedStockId = null;
       render();

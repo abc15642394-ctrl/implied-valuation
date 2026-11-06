@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="5">
+<meta name="app-build" content="6">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -62,6 +62,11 @@
 <!-- ② 估值計算器（這一筆的輸入） -->
 <section class="panel calculator">
   <h2 class="calc-title">DCF 股票估值計算器</h2>
+
+  <p id="editBanner" class="editing" hidden>
+    <span id="editBannerText"></span>
+    <button type="button" id="cancelEdit" class="pill ghost">取消編輯</button>
+  </p>
 
   <div class="calc-grid">
     <label class="g-fact">股價
@@ -177,7 +182,7 @@
     <table id="recordTable">
       <thead>
         <tr>
-          <th>日期</th>
+          <th>時間</th>
           <th>標籤</th>
           <th class="num c-fact">股價</th>
           <th class="num c-fact">EPS</th>
@@ -194,7 +199,8 @@
       <tbody id="recordBody"></tbody>
     </table>
   </div>
-  <p class="hint">每個數字下方的小字，是跟「前一筆（較舊）」相比的變化。</p>
+  <p class="hint">依日期分組：同一天的幾筆是平行試算，彼此不互相比較。
+    每個數字下方的小字，是跟<strong>前一個日期</strong>的代表筆（該日最新一筆）相比的變化。</p>
 </section>
 
 <p class="footnote">

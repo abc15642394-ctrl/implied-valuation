@@ -868,25 +868,54 @@ button.pill.danger { background: var(--bad); color: #fff; border: none; }
   margin-bottom: 14px;
 }
 
+/* 不要加 preserveAspectRatio="none"：那會把刻度文字橫向扯變形。 */
 .trend-svg {
   display: block;
   width: 100%;
-  height: 90px;
-  overflow: visible;
+  height: auto;
+  max-height: 260px;
 }
 
 .trend-svg polyline {
   fill: none;
-  stroke-width: 1.1;
-  vector-effect: non-scaling-stroke;
+  stroke-width: 1.8;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 .trend-svg .line-market { stroke: var(--c-market); }
-.trend-svg .line-mine { stroke: var(--c-mine); stroke-dasharray: 3 2; }
-.trend-svg .line-market-dot { fill: var(--c-market); }
-.trend-svg .line-mine-dot { fill: var(--c-mine); }
+.trend-svg .line-mine { stroke: var(--c-mine); stroke-dasharray: 5 3; }
+
+.trend-svg .grid { stroke: var(--line); stroke-width: 1; }
+.trend-svg .grid.zero { stroke: var(--muted); stroke-width: 1.4; }
+
+.trend-svg .tick-y,
+.trend-svg .tick-x {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.trend-svg .tick-y { text-anchor: end; }
+.trend-svg .tick-x { text-anchor: middle; }
+
+.trend-svg .dot-market { fill: var(--c-market); }
+.trend-svg .dot-mine { fill: var(--c-mine); }
+.trend-svg .dot-market.alt, .trend-svg .dot-mine.alt { opacity: .45; }
+
+.trend-svg .pt-label {
+  font-size: 10.5px;
+  font-family: inherit;
+  font-weight: 600;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.trend-svg .pt-label.market { fill: var(--c-market); }
+.trend-svg .pt-label.mine { fill: var(--c-mine); }
 
 .trend-legend {
   display: flex;
@@ -1013,4 +1042,70 @@ button.pill.danger { background: var(--bad); color: #fff; border: none; }
   #recordTable .rec-note { max-width: none; }
   #recordTable .delta { display: inline-block; margin: 0 0 0 6px; }
   #recordTable .val { display: inline-block; }
+}
+
+/* ---- 分頁表：日期分組標頭 ---- */
+
+#recordTable tr.group-row td {
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 10px;
+  white-space: normal;
+}
+
+.g-date { font-weight: 700; font-size: .86rem; }
+.g-count {
+  margin-left: 8px;
+  font-size: .74rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.g-hint, .g-base { margin-left: 10px; font-size: .72rem; color: var(--muted); }
+.g-base { font-style: italic; }
+
+.rec-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.rec-actions { white-space: nowrap; }
+.rec-actions .pill { margin-right: 4px; }
+
+/* ---- 編輯模式 ---- */
+
+.editing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-left: 4px solid var(--warn);
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.editing[hidden] { display: none; }
+.editing button { margin-left: auto; }
+
+input[readonly], select:disabled {
+  background: var(--bg);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* ---- 手機 ---- */
+
+@media (max-width: 768px) {
+  .trend-svg { max-height: none; }
+
+  #recordTable tr.group-row { display: block; grid-template-columns: none; padding: 0; border: none; background: none; margin: 14px 0 6px; }
+  #recordTable tr.group-row td { display: block; background: none; border: none; padding: 0; }
+  #recordTable tr.group-row td::before { display: none; }
+  .g-hint, .g-base { display: block; margin-left: 0; margin-top: 2px; }
+
+  .rec-actions { justify-content: flex-end; }
 }
