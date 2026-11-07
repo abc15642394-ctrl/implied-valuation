@@ -3,7 +3,7 @@
 // 為什麼不是 cache-first：HTML 與 JS 必須是同一版才能運作（JS 會去抓 HTML 裡的元素）。
 // cache-first 一旦快取到不成對的組合，就會永遠供應下去，使用者無法自救。
 // network-first 讓每次連線都拿到成對的最新版，離線才回退快取。
-var CACHE = 'iv-calc-v11';
+var CACHE = 'iv-calc-v12';
 
 // 這些檔案彼此相依，必須同版
 var SHELL = ['./', 'index.html', 'app.css', 'valuation.js', 'store.js', 'app.js'];

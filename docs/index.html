@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="11">
+<meta name="app-build" content="12">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -131,8 +131,9 @@
 </section>
 
 <div class="tabs" role="tablist" aria-label="檢視">
-  <button type="button" class="tab on" role="tab" id="tabList" aria-selected="true" data-tab="list">追蹤清單</button>
-  <button type="button" class="tab" role="tab" id="tabSummary" aria-selected="false" data-tab="summary">隱含總表</button>
+  <button type="button" class="tab on" role="tab" id="tabList" aria-selected="true" data-tab="list" data-view="viewList">追蹤清單</button>
+  <button type="button" class="tab" role="tab" id="tabSummary" aria-selected="false" data-tab="summary" data-view="viewSummary">隱含總表</button>
+  <button type="button" class="tab" role="tab" id="tabAi" aria-selected="false" data-tab="ai" data-view="viewAi">AI insight</button>
 </div>
 
 <section class="filters">
@@ -228,8 +229,8 @@
 
   <p id="summaryEmpty" class="empty" hidden></p>
 
-  <div class="table-wrap" id="summaryWrap" hidden>
-    <table id="summaryTable">
+  <div class="table-wrap sum-wrap" id="summaryWrap" hidden>
+    <table id="summaryTable" class="sum-table">
       <thead>
         <tr>
           <th data-sum-sort="ticker">代號</th>
@@ -253,8 +254,8 @@
   <section id="fairOnlySection" class="panel fair-only" hidden>
     <h2 class="sec-title">只算得出合理價（還沒填現價，反推不出市場隱含）</h2>
     <p class="hint">在「現價」欄填一個價格，這一列就會移到上面的隱含總表，有自己的市場隱含與落差。</p>
-    <div class="table-wrap" id="fairOnlyWrap">
-      <table id="fairOnlyTable">
+    <div class="table-wrap sum-wrap" id="fairOnlyWrap">
+      <table id="fairOnlyTable" class="sum-table">
         <thead>
           <tr>
             <th>代號</th>
@@ -275,6 +276,40 @@
   </section>
 </div><!-- /#viewSummary -->
 
+<!-- AI insight：一張精簡、好整碗端給 AI 的表 -->
+<div id="viewAi" hidden>
+  <div class="ai-bar">
+    <button type="button" id="aiCopy" class="pill">複製給 AI</button>
+    <span class="lg hint-inline">複製的文字除了畫面上這幾欄，還會附上折現率、永續成長率，
+      以及每一檔的「我估 1-5 年／6-10 年」——少了這些，AI 看到合理價也無從判斷它是怎麼來的。</span>
+    <span id="aiCopyMsg" class="nudge" hidden></span>
+  </div>
+
+  <p id="aiEmpty" class="empty" hidden></p>
+
+  <div class="table-wrap sum-wrap" id="aiWrap">
+    <table id="aiTable" class="sum-table">
+      <thead>
+        <tr>
+          <th data-ai-sort="ticker">代號</th>
+          <th data-ai-sort="name">名稱</th>
+          <th data-ai-sort="date">估值日期</th>
+          <th data-ai-sort="currentPrice" class="num c-fact">現價</th>
+          <th data-ai-sort="eps" class="num c-fact">EPS</th>
+          <th data-ai-sort="pe" class="num c-fact">本益比</th>
+          <th data-ai-sort="fairValue" class="num c-mine">我估的合理價</th>
+          <th data-ai-sort="implied" class="num c-market">市場隱含</th>
+          <th data-ai-sort="gap" class="num c-signal">落差</th>
+          <th data-ai-sort="upside" class="num c-mine">上漲空間</th>
+          <th data-ai-sort="note">備註</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="aiBody"></tbody>
+    </table>
+  </div>
+</div><!-- /#viewAi -->
+
 <p class="footnote">
   <span class="key c-fact">事實</span>股價與 EPS 是你抄進來的。
   <span class="key c-market">市場</span>隱含成長率是從現價反推的。
@@ -283,6 +318,7 @@
   <span class="key c-warn">警示</span>永續佔比越高，估值越是靠第 10 年後的終值假設撐著。<br>
   <strong>現價</strong>是這一檔「今天的價」，存在股票上、隨時可改，市場隱含與上漲空間都從它算；
   <strong>當時股價</strong>是你跑那一筆估值時抄的價，屬於那一筆，只拿來對照，改現價不會動到它。<br>
+  <strong>本益比</strong>＝現價 ÷ 你填的 EPS。EPS 若填的是你自己估的未來值，那它就是預估本益比，不是歷史本益比。<br>
   主表顯示每檔「最新一筆」；點一列即可展開該檔的所有紀錄與走勢。折現率與永續成長率所有股票共用。
 </p>
 
@@ -360,6 +396,19 @@
       <button type="button" id="pickRates" class="primary">輸入每年成長率</button>
       <button type="button" id="pickEndpoints" class="primary">輸入期初與期末值</button>
       <button type="button" class="ghost" data-close-modal>取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 剪貼簿被瀏覽器擋下時的備援。寫成靜態標記，因為 data-close-modal 與
+     點背景關閉都是在 bind() 啟動時一次綁完的，動態生出來的會關不掉。 -->
+<div id="aiCopyModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>瀏覽器擋下了剪貼簿</h2>
+    <p class="hint">下面的文字已經全選，直接按複製鍵（⌘C／Ctrl+C）就能帶走。</p>
+    <textarea id="aiCopyText" class="copy-text" readonly rows="12"></textarea>
+    <div class="modal-actions">
+      <button type="button" class="ghost" data-close-modal>關閉</button>
     </div>
   </div>
 </div>
