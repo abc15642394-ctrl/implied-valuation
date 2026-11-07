@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 9;            // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 10;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -132,18 +132,58 @@
       + (on ? '★' : '☆') + '</button>';
   }
 
-  // 市場隱含的五級分帶，界線 0 / 10 / 20 / 30。
+  // 市場隱含的五級分帶。四條界線存在設定裡，使用者可以自己改。
   // 低＝市場要求不高（相對便宜）→ 綠；高＝市場要求極高 → 紅。
-  function impliedBand(v) {
+  // 每一帶都是「左閉右開」：b2 是 [界線1, 界線2)，最後一帶是 [界線4, ∞)。
+  function bandOf(v, bands) {
     if (v === null || !isFinite(v)) return '';
     // 用「顯示出來的那個數字」分帶，不是原始值。二分搜尋會回傳 9.999389…，
     // 畫面四捨五入成 10.00% 卻被分到 0–10% 那一帶，顏色跟數字對不起來。
     var shown = Math.round(v * 100) / 100;
-    if (shown < 0) return 'b1';
-    if (shown < 10) return 'b2';
-    if (shown < 20) return 'b3';
-    if (shown < 30) return 'b4';
-    return 'b5';
+    for (var i = 0; i < bands.length; i++) {
+      if (shown < bands[i]) return 'b' + (i + 1);
+    }
+    return 'b' + (bands.length + 1);
+  }
+
+  // 檔案不同步時（快取只更新了一半，app.js 是新的、store.js 還是舊的）
+  // settings().bands 會是 undefined，讀 .length 就整頁炸掉。分帶只是顏色，
+  // 不值得讓整張表畫不出來——退回預設界線，表照畫。
+  var BAND_FALLBACK = [0, 10, 20, 30];
+  function bandBounds() {
+    var b = settings().bands;
+    if (Array.isArray(b) && b.length === BAND_FALLBACK.length) return b;
+    return (Store.DEFAULT_BANDS || BAND_FALLBACK).slice();
+  }
+
+  // 界線能不能編輯，取決於資料層有沒有這個功能（同樣是為了檔案不同步的情況）
+  function bandsEditable() { return typeof Store.bandsError === 'function'; }
+
+  function impliedBand(v) { return bandOf(v, bandBounds()); }
+
+  // 界線顯示成最短的樣子：10 就寫 10，12.5 就寫 12.5，不要 10.00。
+  function fmtBound(n) {
+    if (!isFinite(n)) return '?';
+    return String(Math.round(n * 100) / 100);
+  }
+
+  // 五個分帶的文字，從四條界線長出來。符號要跟 bandOf 的比較方式一致：
+  // 寫「> 30%」但程式把剛好 30.00% 放進最後一帶，看的人會對不起來。
+  function bandLabels(bands) {
+    var out = ['< ' + fmtBound(bands[0]) + '%'];
+    for (var i = 1; i < bands.length; i++) {
+      out.push(fmtBound(bands[i - 1]) + '–' + fmtBound(bands[i]) + '%');
+    }
+    out.push('≥ ' + fmtBound(bands[bands.length - 1]) + '%');
+    return out;
+  }
+
+  function bandChipsHtml(bands, counts) {
+    return bandLabels(bands).map(function (label, i) {
+      var n = counts ? counts[i] : null;
+      return '<span class="band b' + (i + 1) + '">' + esc(label)
+        + (n === null ? '' : ' <b class="band-n">' + n + '</b>') + '</span>';
+    }).join('');
   }
 
   function gapState(gap) {
@@ -954,11 +994,79 @@
 
     // 上半部沒東西時，色階圖例沒有對應的表可看，一併收起來。
     $('bandLegend').hidden = withImplied.length === 0;
+    renderBandLegend(withImplied);
 
     document.querySelectorAll('#summaryTable thead th[data-sum-sort]').forEach(function (th) {
       th.classList.toggle('sorted', th.dataset.sumSort === sumSort.key);
       th.classList.toggle('asc', th.dataset.sumSort === sumSort.key && sumSort.dir === 'asc');
     });
+  }
+
+  // 圖例的文字一定要從設定長出來，不能寫死在 HTML——界線改了圖例沒跟著改，
+  // 就會變成一張說謊的對照表。
+  function renderBandLegend(rows) {
+    var bands = bandBounds();
+    $('editBands').hidden = !bandsEditable();
+    $('bandChips').innerHTML = bandChipsHtml(bands, countByBand(rows, bands));
+  }
+
+  // 目前畫面上這些股票各落在哪一帶。跟著篩選走，因為使用者問的是
+  // 「這組界線套在我現在看的這幾檔上長怎樣」。
+  function countByBand(rows, bands) {
+    var counts = [];
+    for (var i = 0; i <= bands.length; i++) counts.push(0);
+    rows.forEach(function (row) {
+      var b = bandOf(row.calc.implied, bands);
+      if (!b) return;
+      counts[parseInt(b.slice(1), 10) - 1]++;
+    });
+    return counts;
+  }
+
+  // ---- 分帶界線編輯器 ----
+
+  function readBandInputs() {
+    return [1, 2, 3, 4].map(function (i) { return numOrNull($('bound' + i).value); });
+  }
+
+  function fillBandInputs(bands) {
+    bands.forEach(function (v, i) { $('bound' + (i + 1)).value = v; });
+  }
+
+  function openBandsModal() {
+    fillBandInputs(bandBounds());
+    recalcBands();
+    $('bandsModal').hidden = false;
+    $('bound1').focus();
+  }
+
+  // 預覽用現在輸入框裡的值，不是已存的值——不然改到一半看到的是舊的分佈，
+  // 等於沒有預覽。
+  function recalcBands() {
+    var raw = readBandInputs();
+    var err = Store.bandsError(raw);
+    $('bandsError').textContent = err || '';
+    $('bandsError').hidden = !err;
+    $('bandsApply').disabled = !!err;
+
+    var bands = err ? bandBounds() : raw;
+    var rows = summaryRows().filter(function (r) { return r.calc.impliedStatus === 'ok'; });
+    $('bandsPreview').innerHTML = bandChipsHtml(bands, countByBand(rows, bands));
+    $('bandsPreviewNote').textContent = err
+      ? '先把上面修好，這裡才會顯示新界線的分佈。'
+      : '括號裡是目前畫面上這 ' + rows.length + ' 檔各自落在哪一帶'
+        + (filtersActive() ? '（已套用你現在的篩選）' : '') + '。';
+  }
+
+  function applyBands() {
+    var res = Store.updateSettings({ bands: readBandInputs() });
+    if (!res.ok) {
+      $('bandsError').textContent = res.error;
+      $('bandsError').hidden = false;
+      return;
+    }
+    closeAllModals();
+    render();
   }
 
   function setTab(name) {
@@ -1393,6 +1501,16 @@
       $('endpointsModal').hidden = false;
     });
 
+    $('editBands').addEventListener('click', openBandsModal);
+    $('bandsReset').addEventListener('click', function () {
+      fillBandInputs(Store.DEFAULT_BANDS || BAND_FALLBACK);
+      recalcBands();
+    });
+    ['bound1', 'bound2', 'bound3', 'bound4'].forEach(function (id) {
+      $(id).addEventListener('input', recalcBands);
+    });
+    $('bandsApply').addEventListener('click', applyBands);
+
     $('rateYears').addEventListener('input', buildRateInputs);
     $('rateInputs').addEventListener('input', recalcRates);
     $('ratesApply').addEventListener('click', function () { applyCagr(parseFloat(this.dataset.value)); });
@@ -1444,8 +1562,10 @@
 
   // ---- 輔助計算機 ----
 
+  // 掃 .modal 而不是列 id：先前是一份寫死的清單，新增一個模態忘了加進去，
+  // Esc 與點背景就關不掉它。
   function closeAllModals() {
-    ['ratesModal', 'endpointsModal', 'helperPicker'].forEach(function (id) { $(id).hidden = true; });
+    document.querySelectorAll('.modal').forEach(function (m) { m.hidden = true; });
   }
 
   function applyCagr(value) {

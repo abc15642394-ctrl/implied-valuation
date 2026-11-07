@@ -434,6 +434,7 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .modal-actions.column { flex-direction: column; }
@@ -1281,6 +1282,46 @@ input[readonly], select:disabled {
 
 .band-legend .lg { color: var(--muted); margin-right: 4px; }
 .band-legend .hint-inline { margin-left: auto; }
+
+/* 色塊包在 #bandChips 裡（由 JS 產生），所以換這一層當 flex 容器 */
+.band-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 每一帶目前有幾檔。沒有數字時整個 <b> 不會畫出來。 */
+/* 不用 opacity 把數字調淡——淺色模式下對比會掉到 5.3，是全站最低的，
+   而這又是 12px 左右的小字。改用尺寸和一條分隔線區分主從，對比維持 7.4 以上。 */
+.band-n {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: .92em;
+  margin-left: 2px;
+  padding-left: 5px;
+  border-left: 1px solid currentColor;
+}
+
+#editBands { margin-left: 2px; }
+
+/* 彈窗裡的預覽：沒有「越綠越…」那句，也不要底下的間距 */
+.band-legend.preview { margin: 12px 0 6px; font-size: .8rem; }
+.band-legend.preview .band-chips { gap: 6px; }
+
+/* 四條界線排成 2×2。auto-fit 在 420px 的框裡會排成 3+1，最後一條孤零零
+   掉到下一行，看起來像是另一種東西。 */
+.bounds-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+  margin-bottom: 4px;
+}
+.bounds-grid label { margin-bottom: 0; }
+
+/* button.primary 是 width:100%，在會換行的 modal-actions 裡會自己佔滿一整列 */
+#bandsModal .modal-actions #bandsApply { width: auto; }
+#bandsModal .modal-actions #bandsReset { margin-right: auto; }
 
 .band-legend .band {
   padding: 3px 10px;

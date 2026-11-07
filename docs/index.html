@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="9">
+<meta name="app-build" content="10">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -218,11 +218,9 @@
 <div id="viewSummary" hidden>
   <div class="band-legend" id="bandLegend">
     <span class="lg">市場隱含成長率</span>
-    <span class="band b1">&lt; 0%</span>
-    <span class="band b2">0–10%</span>
-    <span class="band b3">10–20%</span>
-    <span class="band b4">20–30%</span>
-    <span class="band b5">&gt; 30%</span>
+    <!-- 色塊與文字由 renderBandLegend() 依設定產生，不寫死在這裡 -->
+    <span id="bandChips" class="band-chips"></span>
+    <button type="button" id="editBands" class="pill ghost">調整界線</button>
     <span class="lg hint-inline">越綠＝市場要求越低，越紅＝市場要求越高</span>
   </div>
 
@@ -282,6 +280,33 @@
 </p>
 
 </div><!-- /.shell -->
+
+<!-- 分帶界線 -->
+<div id="bandsModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>調整顏色分帶的界線</h2>
+    <p class="hint">四條界線切出五個分帶。每一帶都含左邊、不含右邊，
+      所以界線剛好等於某個值時，會算進右邊那一帶。</p>
+
+    <div class="bounds-grid">
+      <label>界線 1<span class="field"><input type="number" step="any" inputmode="decimal" id="bound1"><i>%</i></span></label>
+      <label>界線 2<span class="field"><input type="number" step="any" inputmode="decimal" id="bound2"><i>%</i></span></label>
+      <label>界線 3<span class="field"><input type="number" step="any" inputmode="decimal" id="bound3"><i>%</i></span></label>
+      <label>界線 4<span class="field"><input type="number" step="any" inputmode="decimal" id="bound4"><i>%</i></span></label>
+    </div>
+
+    <p id="bandsError" class="error" hidden></p>
+
+    <div id="bandsPreview" class="band-legend preview"></div>
+    <p id="bandsPreviewNote" class="hint"></p>
+
+    <div class="modal-actions">
+      <button type="button" id="bandsReset" class="ghost" title="把四條界線還原成 0 ⁄ 10 ⁄ 20 ⁄ 30">恢復預設</button>
+      <button type="button" id="bandsApply" class="primary">套用</button>
+      <button type="button" class="ghost" data-close-modal>關閉</button>
+    </div>
+  </div>
+</div>
 
 <!-- 輔助計算機：逐年成長率 -->
 <div id="ratesModal" class="modal" hidden>

@@ -12,10 +12,14 @@
   var STORAGE_KEY = 'iv-calc-v1';   // key 不動，靠 schemaVersion 分辨格式
   var SCHEMA_VERSION = 2;
 
+  // 隱含總表的顏色分帶：四條界線切出五個分帶。使用者可以自己改。
+  // 舊資料沒有這個欄位，readSettings 會補上預設值，所以不需要升 schemaVersion。
+  var DEFAULT_BANDS = [0, 10, 20, 30];
+
   function defaultState() {
     return {
       schemaVersion: SCHEMA_VERSION,
-      settings: { discountRate: 10, perpetualGrowth: 2, defaultCagr6_10: 5 },
+      settings: { discountRate: 10, perpetualGrowth: 2, defaultCagr6_10: 5, bands: DEFAULT_BANDS.slice() },
       stocks: [],
       records: [],
       lastExportAt: null
@@ -51,6 +55,42 @@
     if (value === null || value === undefined || value === '') return null;
     var n = parseFloat(value);
     return isFinite(n) ? n : null;
+  }
+
+  // 界線只在反推得出來的範圍內才有意義——Valuation 的二分搜尋夾在
+  // CAGR_MIN 與 CAGR_MAX 之間，界線設在範圍外會切出一個永遠空著的分帶。
+  function bandMin() { return Math.round(Valuation.CAGR_MIN * 100); }
+  function bandMax() { return Math.round(Valuation.CAGR_MAX * 100); }
+
+  // 給 UI 用：回一句話說哪裡不對，沒問題回 null。
+  function bandsError(raw) {
+    if (!Array.isArray(raw) || raw.length !== DEFAULT_BANDS.length) {
+      return '要剛好 ' + DEFAULT_BANDS.length + ' 條界線';
+    }
+    for (var i = 0; i < raw.length; i++) {
+      var n = parseFloat(raw[i]);
+      if (!isFinite(n)) return '第 ' + (i + 1) + ' 條界線還沒填，或填的不是數字';
+      if (n < bandMin() || n > bandMax()) {
+        return '界線要落在 ' + bandMin() + '% 到 ' + bandMax() + '% 之間——反推得出來的成長率就只在這個範圍，'
+          + '設在範圍外的那一帶永遠不會有股票落進去。';
+      }
+      if (i > 0) {
+        var prev = parseFloat(raw[i - 1]);
+        if (n <= prev) {
+          // 「一樣」跟「反過來」是兩回事，別把不適用的解釋貼給另一種情況。
+          return '界線要由小到大：第 ' + (i + 1) + ' 條（' + n + '%）必須大於第 ' + i + ' 條（' + prev + '%）。'
+            + (n === prev ? '兩條一樣的話中間那一帶寬度是 0，那個顏色永遠不會出現。' : '');
+        }
+      }
+    }
+    return null;
+  }
+
+  // 壞掉就整組退回預設。半套的界線會畫出一個不可能出現的分帶，
+  // 比直接用預設值更難發現出了什麼事。
+  function normalizeBands(raw) {
+    if (bandsError(raw)) return DEFAULT_BANDS.slice();
+    return raw.map(function (v) { return parseFloat(v); });
   }
 
   // 'YYYY-MM-DD'；收到 ISO 時間戳就截前 10 碼
@@ -148,7 +188,8 @@
     var out = {
       discountRate: num(s.discountRate, base.discountRate),
       perpetualGrowth: num(s.perpetualGrowth, base.perpetualGrowth),
-      defaultCagr6_10: num(s.defaultCagr6_10, base.defaultCagr6_10)
+      defaultCagr6_10: num(s.defaultCagr6_10, base.defaultCagr6_10),
+      bands: normalizeBands(s.bands)
     };
     // 折現率若不大於永續成長率，整個模型會壞掉（Infinity 或負合理價）
     if (!(out.discountRate > out.perpetualGrowth)) {
@@ -207,16 +248,20 @@
     if (!isFinite(dr) || !isFinite(pg)) return '折現率與永續成長率都必須是數字';
     if (dr <= pg) return '折現率必須大於永續成長率，否則永續價值公式會算出無限大或負數';
     if (dr <= 0) return '折現率必須大於 0';
+    if (patch.bands !== undefined) return bandsError(patch.bands);
     return null;
   }
 
   function updateSettings(patch) {
     var error = validateSettings(patch);
     if (error) return { ok: false, error: error };
+    // 整個物件重建：每加一個設定欄位都要記得補進來，
+    // 漏掉的話改折現率就會把它無聲清掉。
     state.settings = {
       discountRate: num(patch.discountRate, state.settings.discountRate),
       perpetualGrowth: num(patch.perpetualGrowth, state.settings.perpetualGrowth),
-      defaultCagr6_10: num(patch.defaultCagr6_10, state.settings.defaultCagr6_10)
+      defaultCagr6_10: num(patch.defaultCagr6_10, state.settings.defaultCagr6_10),
+      bands: patch.bands === undefined ? state.settings.bands.slice() : normalizeBands(patch.bands)
     };
     persist();
     return { ok: true };
@@ -490,6 +535,8 @@
 
   global.Store = {
     SCHEMA_VERSION: SCHEMA_VERSION,
+    DEFAULT_BANDS: DEFAULT_BANDS,
+    bandsError: bandsError,
     today: today,
     load: load,
     getState: getState,
