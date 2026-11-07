@@ -294,12 +294,29 @@ tbody tr:last-child td { border-bottom: none; }
 
 td input {
   width: 64px;
-  padding: 3px 6px;
+  padding: 3px 4px;
   text-align: right;
   font-size: .85rem;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
+}
+
+/* 表格裡的數字輸入框拿掉上下箭頭。實測它不佔版面寬度（加了 appearance
+   之後 clientWidth／scrollWidth 一格都沒變），但它會覆蓋在數字右側，
+   「14」這種兩位數都會被壓掉一半——這是可讀性的修正，不是寬度的來源。
+   計算器那邊是全寬輸入框，箭頭不礙事，維持原樣。 */
+.sum-table td input[type="number"],
+#stockTable td input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.sum-table td input[type="number"]::-webkit-outer-spin-button,
+.sum-table td input[type="number"]::-webkit-inner-spin-button,
+#stockTable td input[type="number"]::-webkit-outer-spin-button,
+#stockTable td input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 td input:hover { border-color: var(--line); }
@@ -1441,6 +1458,15 @@ input[readonly], select:disabled {
   #aiTable td[data-col="date"] { display: none; }
 }
 
+/* 13 欄的表單靠儲存格內距撐不起來：1024px 需要 1021 而容器只有 990，
+   1280px 加一檔美股（4 位數股價）也會超出 8px。內距收 2px × 13 欄回收 44px，
+   在 1024 以上一律套用——這張表本來就是三張裡最密的那一張。
+   起點刻意設在 1024 而不是 769：這是 #aiTable（id）規則，跟 ≤1023 那一段的
+   .sum-table（class）重疊的話，會把那邊整組收斂蓋掉（實測 769px 會爆到 884）。 */
+@media (min-width: 1024px) {
+  #aiTable th, #aiTable td { padding-left: 5px; padding-right: 5px; }
+}
+
 /* ---- AI insight：試算沙盒 ---- */
 
 /* 被你改過的格子要看得出來，否則分不清眼前的數字是真的還是試算的。 */
@@ -1455,14 +1481,37 @@ input[readonly], select:disabled {
 }
 
 #aiTable tbody tr > td[data-col="ticker"] { cursor: pointer; }
+
+/* 代號欄是這張表最肥的一欄（實測 140px）。市場徽章在這裡讓位：市場在上面
+   可以篩選，另外兩個分頁也都看得到，是這一列裡最便宜的 26px。 */
+#aiTable .mkt { display: none; }
+
+/* 名稱欄的上限。全站是 140px，這張表 13 欄禁不起那麼長的名稱——
+   1280px 下算完只剩 9px 餘裕，一個長名稱就會把表推出去。 */
+@media (min-width: 769px) {
+  #aiTable .ellip { max-width: 100px; }
+}
 #aiTable .caret { color: var(--muted); font-size: .7rem; margin-left: 6px; }
 
 /* 合理區間：兩個小框 ＋ 現價落在區間下方／內／上方的訊號色 */
 .range-box { display: inline-flex; align-items: center; gap: 2px; justify-content: flex-end; }
 .range-box i { font-style: normal; color: var(--muted); }
-.sum-table td input.ai-in.r { width: 46px; }
+/* 寬度是量出來的，不是估的。46px 只放得下 4 位整數；實測要 72px 才容得下
+   最壞的情況——「8888.88」「12345」「1380.25」都完整顯示（「1101.47」比較窄，
+   因為 1 這個字比較細，不能拿它當標準）。
+   最後取 66px：72px 文字也放得下，但表格在 1101px 會溢出 7px；66px 在
+   1101 留 5px、1024 留 10px 餘裕。
+   這裡必須用 .sum-table（class）而不是 #aiTable（id）：id 會蓋掉下面
+   769–1023px 那一段的 34px 收斂，實測那樣 769px 會從 780 爆到 884。 */
+.sum-table td input.ai-in.r { width: 66px; }
 .range-box.good input.ai-in { border-color: var(--good); }
 .range-box.bad input.ai-in { border-color: var(--bad); }
+
+/* 兩個框要看起來是兩個獨立欄位。只在 1024 以上拉開——769–1023 那一段
+   本來就已經很擠，多 6px 會讓它更糟。 */
+@media (min-width: 1024px) {
+  .range-box { gap: 5px; }
+}
 
 /* 展開的試算區。這一列是單一 colspan 儲存格，手機的卡片規則會把它吃成
    一張只佔半欄的怪卡片，所以下面手機區塊要明確覆寫成 block。 */
@@ -1481,8 +1530,9 @@ input[readonly], select:disabled {
 .ai-f .real { color: var(--muted); font-size: .7rem; margin-top: 2px; }
 .ai-expand .hint { margin: 8px 0 0; }
 
-/* 備註是這三張表裡唯一的文字欄：讓它吃掉剩下的寬度，其餘欄維持 nowrap。 */
-.sum-table td[data-col="note"] { min-width: 120px; }
+/* 備註是這三張表裡唯一的文字欄：讓它吃掉剩下的寬度，其餘欄維持 nowrap。
+   min-width 只是下限，欄位本來就會隨剩餘空間長，所以收小不等於變窄。 */
+.sum-table td[data-col="note"] { min-width: 88px; }
 .sum-table td[data-col="note"] input { width: 100%; min-width: 0; text-align: left; }
 
 .fair-only { margin-top: 18px; border-left: 4px solid var(--c-mine); }
@@ -1503,7 +1553,6 @@ input[readonly], select:disabled {
   #aiTable td input.ai-in.r { width: 34px; }
   #aiTable td[data-col="note"] { min-width: 56px; }
   #aiTable .sum-actions .pill { padding: 3px 7px; }
-  #aiTable .mkt { display: none; }
   #aiTable .caret { margin-left: 3px; }
   .sum-actions .pill { margin-right: 2px; }
 }
@@ -1575,6 +1624,12 @@ input[readonly], select:disabled {
     margin: 4px 0;
     font-size: 1.05rem;
   }
+
+  /* 兩個框擠不進半欄的格子（實測格子 158px），在卡片上讓它佔整列。
+     佔整列之後有 325px 可用，框就不必再遷就桌機的 66px——手機是最常
+     用拇指打字的地方，給它 88px，再長的數字也看得完。 */
+  .sum-table tbody td[data-col="range"] { grid-column: 1 / -1; }
+  .sum-table td input.ai-in.r { width: 88px; }
 
   .sum-table tbody td[data-col="actions"] { justify-content: flex-end; margin-top: 4px; }
   .sum-table tbody td[data-col="actions"]::before { display: none; }

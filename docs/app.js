@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 13;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 14;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
