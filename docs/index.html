@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="10">
+<meta name="app-build" content="11">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -70,7 +70,9 @@
 
   <div class="calc-grid">
     <label class="g-fact">股價
-      <span class="field"><input type="number" step="any" inputmode="decimal" id="calcPrice" placeholder="請輸入目前股價"><i>元</i></span>
+      <span class="field"><input type="number" step="any" inputmode="decimal" id="calcPrice"
+        title="這一筆估值當下的股價。加入追蹤時會同時成為這一檔的「現價」；只想算合理價就留空。"
+        placeholder="請輸入目前股價（可留空＝只算合理價）"><i>元</i></span>
     </label>
     <label class="g-fact">每股盈餘 (EPS)
       <span class="field"><input type="number" step="any" inputmode="decimal" id="calcEps" placeholder="請輸入 EPS"><i>元</i></span>
@@ -193,7 +195,7 @@
       <thead>
         <tr>
           <th>時間・標籤</th>
-          <th class="num c-fact">股價</th>
+          <th class="num c-fact">當時股價</th>
           <th class="num c-fact">EPS</th>
           <th class="num c-mine">我估 1-5 年</th>
           <th class="num c-mine">6-10 年</th>
@@ -234,6 +236,7 @@
           <th data-sum-sort="name">名稱</th>
           <th data-sum-sort="date">估值日期</th>
           <th data-sum-sort="price" class="num c-fact">當時股價</th>
+          <th data-sum-sort="currentPrice" class="num c-fact">現價</th>
           <th data-sum-sort="eps" class="num c-fact">EPS</th>
           <th data-sum-sort="myCagr1_5" class="num c-mine">我估 1-5 年</th>
           <th data-sum-sort="implied" class="num c-market">市場隱含</th>
@@ -248,7 +251,8 @@
   </div>
 
   <section id="fairOnlySection" class="panel fair-only" hidden>
-    <h2 class="sec-title">只算得出合理價（未填股價，無法反推市場隱含）</h2>
+    <h2 class="sec-title">只算得出合理價（還沒填現價，反推不出市場隱含）</h2>
+    <p class="hint">在「現價」欄填一個價格，這一列就會移到上面的隱含總表，有自己的市場隱含與落差。</p>
     <div class="table-wrap" id="fairOnlyWrap">
       <table id="fairOnlyTable">
         <thead>
@@ -256,6 +260,7 @@
             <th>代號</th>
             <th>名稱</th>
             <th>估值日期</th>
+            <th class="num c-fact">現價</th>
             <th class="num c-fact">EPS</th>
             <th class="num c-mine">我估 1-5 年</th>
             <th class="num c-mine">6-10 年</th>
@@ -276,6 +281,8 @@
   <span class="key c-mine">我估</span>合理價與上漲空間來自你填的成長率。
   <span class="key c-signal">訊號</span>落差＝市場隱含 − 我估，負值代表市場的要求比你低。
   <span class="key c-warn">警示</span>永續佔比越高，估值越是靠第 10 年後的終值假設撐著。<br>
+  <strong>現價</strong>是這一檔「今天的價」，存在股票上、隨時可改，市場隱含與上漲空間都從它算；
+  <strong>當時股價</strong>是你跑那一筆估值時抄的價，屬於那一筆，只拿來對照，改現價不會動到它。<br>
   主表顯示每檔「最新一筆」；點一列即可展開該檔的所有紀錄與走勢。折現率與永續成長率所有股票共用。
 </p>
 

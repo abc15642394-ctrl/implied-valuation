@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 10;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 11;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -78,10 +78,14 @@
 
   // ---- 計算（吃一筆 record） ----
 
-  function computeRecord(rec, st) {
+  // priceOverride：主表與隱含總表傳股票的「現價」（今天的價），
+  // 分頁表與趨勢圖不傳，用該筆自己的「當時股價」——那是歷史快照，
+  // 被今天的價覆寫的話，整條走勢線就不是當時真的發生過的事了。
+  function computeRecord(rec, st, priceOverride) {
     var dr = st.discountRate / 100;
     var pg = st.perpetualGrowth / 100;
     var g610 = (rec.cagr6_10 || 0) / 100;
+    var price = priceOverride === undefined ? rec.price : priceOverride;
 
     var out = {
       implied: null, impliedStatus: 'invalid',
@@ -96,11 +100,11 @@
       if (isFinite(parts.total) && parts.total > 0) {
         out.fairValue = parts.total;
         out.tvShare = (parts.terminal / parts.total) * 100;
-        if (rec.price > 0) out.upside = (parts.total / rec.price - 1) * 100;
+        if (price > 0) out.upside = (parts.total / price - 1) * 100;
       }
     }
 
-    var res = Valuation.impliedCagr1_5(rec.price, rec.eps, g610, dr, pg);
+    var res = Valuation.impliedCagr1_5(price, rec.eps, g610, dr, pg);
     out.impliedStatus = res.status;
     if (res.status === 'ok') {
       out.implied = res.cagr * 100;
@@ -316,7 +320,7 @@
       return {
         stock: s,
         rec: rec,
-        calc: rec ? computeRecord(rec, st) : null,
+        calc: rec ? computeRecord(rec, st, s.currentPrice) : null,
         count: Store.countOf(s.id)
       };
     }).filter(function (r) { return !!r.rec; });   // 沒有任何紀錄的股票不該出現
@@ -333,7 +337,7 @@
       case 'status': return s.status;
       case 'count': return row.count;
       case 'date': return r.date;
-      case 'price': return r.price;
+      case 'price': return s.currentPrice;       // 主表的「現價」是股票層級的
       case 'eps': return r.eps;
       case 'myCagr1_5': return r.myCagr1_5;
       case 'implied': return c.implied;
@@ -374,19 +378,34 @@
       + '" data-label="' + LABELS[col] + '">' + inner + '</td>';
   }
 
+  function numInput(attrs, value, hint, placeholder) {
+    return '<input type="number" step="any" inputmode="decimal" title="' + esc(hint) + '" '
+      + (placeholder ? 'placeholder="' + esc(placeholder) + '" ' : '')
+      + attrs + ' value="' + inputValue(value) + '">';
+  }
+
   function editCell(rec, field) {
     // 主表顯示的是該檔「最新一筆」，就地編輯動到的也只有那一筆——
     // 累積多筆之後很容易誤以為是在改整檔，所以把它寫在 title 上。
     var hint = '編輯的是最新一筆（' + rec.date + '）';
     return '<td class="num ' + (COL_TONE[field] || '') + '" data-col="' + field + '" data-label="' + LABELS[field] + '">'
-      + '<input type="number" step="any" inputmode="decimal" title="' + esc(hint) + '" data-rec="' + rec.id
-      + '" data-field="' + field + '" value="' + inputValue(rec[field]) + '"></td>';
+      + numInput('data-rec="' + rec.id + '" data-field="' + field + '"', rec[field], hint) + '</td>';
   }
 
-  function impliedHtml(c, rec) {
+  // 現價存在股票上，不屬於任何一筆紀錄。它跟紀錄裡的「當時股價」是兩個數字：
+  // 改現價只會重算市場隱含與上漲空間，不會改寫你任何一次估值的歷史。
+  var PRICE_HINT = '現價＝今天的價。改它會重算市場隱含與上漲空間，不會動到任何一筆估值紀錄。留空＝只算得出合理價。';
+
+  function priceCell(stock, col, label, tone, placeholder) {
+    return '<td class="num ' + (tone || '') + '" data-col="' + col + '" data-label="' + label + '">'
+      + numInput('data-stock-id="' + esc(stock.id) + '" data-stock-field="currentPrice"',
+          stock.currentPrice, PRICE_HINT, placeholder) + '</td>';
+  }
+
+  function impliedHtml(c, eps, price) {
     return c.impliedStatus === 'ok'
       ? fmtPct(c.implied)
-      : '<span class="signal-cell na">' + esc(statusMessage(c.impliedStatus, rec.eps, rec.price)) + '</span>';
+      : '<span class="signal-cell na">' + esc(statusMessage(c.impliedStatus, eps, price)) + '</span>';
   }
 
   function gapHtml(c) {
@@ -423,11 +442,11 @@
       + ' <span class="mkt">' + (s.market === 'US' ? 'US' : 'TW') + '</span>');
     html += cell('name', '<span class="ellip" title="' + esc(s.name) + '">' + esc(s.name) + '</span>');
 
-    html += editCell(r, 'price');
+    html += priceCell(s, 'price', LABELS.price, COL_TONE.price);
     html += editCell(r, 'eps');
     html += editCell(r, 'myCagr1_5');
 
-    html += cell('implied', impliedHtml(c, r), 'num');
+    html += cell('implied', impliedHtml(c, r.eps, s.currentPrice), 'num');
     html += cell('gap', gapHtml(c), 'num');
     html += cell('fairValue', fmtNum(c.fairValue), 'num');
     html += cell('upside', c.upside === null ? '—' : fmtSigned(c.upside, 1, '%'), 'num');
@@ -442,10 +461,10 @@
 
   // 就地編輯後只重畫該列的計算欄位，不整表重建
   // （重建會把焦點與手機卡片的展開狀態一起弄丟）。
-  function refreshMainRow(tr, rec) {
-    var c = computeRecord(rec, settings());
+  function refreshMainRow(tr, rec, stock) {
+    var c = computeRecord(rec, settings(), stock.currentPrice);
     var map = {
-      implied: impliedHtml(c, rec),
+      implied: impliedHtml(c, rec.eps, stock.currentPrice),
       gap: gapHtml(c),
       fairValue: fmtNum(c.fairValue),
       upside: c.upside === null ? '—' : fmtSigned(c.upside, 1, '%'),
@@ -580,7 +599,7 @@
     if (rec.starred && rec.starNote) meta += '<span class="star-note">' + esc(rec.starNote) + '</span>';
     html += '<td data-label="時間" class="rec-time">' + meta + '</td>';
 
-    html += '<td class="num c-fact" data-label="股價">'
+    html += '<td class="num c-fact" data-label="當時股價">'
       + numWithDelta(rec.price, prev && prev.price, 'pct', fmtNum(rec.price)) + '</td>';
     html += '<td class="num c-fact" data-label="EPS">'
       + numWithDelta(rec.eps, prev && prev.eps, 'pct', fmtNum(rec.eps)) + '</td>';
@@ -589,7 +608,7 @@
         rec.myCagr1_5 === null ? '未估' : fmtPct(rec.myCagr1_5)) + '</td>';
     html += '<td class="num c-mine" data-label="6-10 年">' + fmtPct(rec.cagr6_10) + '</td>';
     html += '<td class="num c-market" data-label="市場隱含">'
-      + numWithDelta(c.implied, prevCalc && prevCalc.implied, 'pp', impliedHtml(c, rec)) + '</td>';
+      + numWithDelta(c.implied, prevCalc && prevCalc.implied, 'pp', impliedHtml(c, rec.eps, rec.price)) + '</td>';
     html += '<td class="num c-signal" data-label="落差">'
       + numWithDelta(c.gap, prevCalc && prevCalc.gap, 'pp', gapHtml(c)) + '</td>';
     html += '<td class="num c-mine" data-label="合理價">'
@@ -865,9 +884,15 @@
       return true;
     }).map(function (s) {
       var rec = Store.latestRecord(s.id);
-      return { stock: s, rec: rec, calc: rec ? computeRecord(rec, st) : null };
+      // 數字（EPS、我估、6-10 年、估值日期）來自最新一筆紀錄，
+      // 價格來自股票層級的現價——所以「這次只算合理價」的紀錄不會讓整檔消失。
+      return { stock: s, rec: rec, calc: rec ? computeRecord(rec, st, s.currentPrice) : null };
     }).filter(function (r) { return !!r.rec; });
   }
+
+  // 分上下半部的唯一判準：有沒有現價。有現價才反推得出市場隱含，
+  // 下半部的標題「未填現價」也才永遠是真的。
+  function hasPrice(row) { return row.stock.currentPrice > 0; }
 
   function sumValue(row, key) {
     var s = row.stock, r = row.rec, c = row.calc;
@@ -875,7 +900,8 @@
       case 'ticker': return s.ticker;
       case 'name': return s.name;
       case 'date': return r.date;
-      case 'price': return r.price;
+      case 'price': return r.price;              // 當時股價＝那一筆紀錄的
+      case 'currentPrice': return s.currentPrice; // 現價＝股票層級的
       case 'eps': return r.eps;
       case 'myCagr1_5': return r.myCagr1_5;
       case 'implied': return c.implied;
@@ -909,8 +935,8 @@
   }
 
   var SUM_LABELS = {
-    ticker: '代號', name: '名稱', date: '估值日期', price: '當時股價', eps: 'EPS',
-    myCagr1_5: '我估 1-5 年', implied: '市場隱含', gap: '落差', fairValue: '合理價',
+    ticker: '代號', name: '名稱', date: '估值日期', price: '當時股價', currentPrice: '現價',
+    eps: 'EPS', myCagr1_5: '我估 1-5 年', implied: '市場隱含', gap: '落差', fairValue: '合理價',
     upside: '上漲空間', cagr6_10: '6-10 年', tvShare: '永續佔比', actions: ''
   };
 
@@ -926,15 +952,21 @@
 
   function summaryRowHtml(row) {
     var s = row.stock, r = row.rec, c = row.calc;
-    var band = impliedBand(c.implied);
+    var band = c.impliedStatus === 'ok' ? impliedBand(c.implied) : '';
     var html = '<tr data-sum-stock="' + esc(s.id) + '">';
     html += sumIdCell(s);
     html += sumCell('name', '<span class="ellip" title="' + esc(s.name) + '">' + esc(s.name) + '</span>');
     html += sumCell('date', '<span title="' + esc(r.date) + '">' + esc(shortDate(r.date)) + '</span>');
     html += sumCell('price', fmtNum(r.price), 'num c-fact');
+    html += priceCell(s, 'currentPrice', SUM_LABELS.currentPrice, 'c-fact');
     html += sumCell('eps', fmtNum(r.eps), 'num c-fact');
     html += sumCell('myCagr1_5', r.myCagr1_5 === null ? '<span class="na">未估</span>' : fmtPct(r.myCagr1_5), 'num c-mine');
-    html += sumCell('implied', '<span class="band-val">' + fmtPct(c.implied) + '</span>', 'num band ' + band);
+    // 算得出數值才上色。超出可反推範圍的那兩種有填現價、但沒有可比的數值，
+    // 硬塞一個顏色的話，圖例的分帶計數就會跟表上的色塊對不起來。
+    html += sumCell('implied', c.impliedStatus === 'ok'
+      ? '<span class="band-val">' + fmtPct(c.implied) + '</span>'
+      : impliedHtml(c, r.eps, s.currentPrice),
+      'num ' + (band ? 'band ' + band : 'c-market'));
     html += sumCell('gap', gapHtml(c), 'num');
     html += sumCell('fairValue', fmtNum(c.fairValue), 'num c-mine');
     html += sumCell('upside', c.upside === null ? '—' : fmtSigned(c.upside, 1, '%'), 'num c-mine');
@@ -948,6 +980,9 @@
     html += sumIdCell(s);
     html += sumCell('name', '<span class="ellip" title="' + esc(s.name) + '">' + esc(s.name) + '</span>');
     html += sumCell('date', '<span title="' + esc(r.date) + '">' + esc(shortDate(r.date)) + '</span>');
+    // 這一格就是出路：填上現價，這一列立刻移到上半部，有自己的市場隱含。
+    // 這裡的輸入框要看得出來是「請填這裡」，不能跟其他唯讀儲存格長一樣。
+    html += priceCell(s, 'currentPrice', SUM_LABELS.currentPrice, 'c-fact', '填現價'); 
     html += sumCell('eps', fmtNum(r.eps), 'num c-fact');
     html += sumCell('myCagr1_5', r.myCagr1_5 === null ? '<span class="na">未估</span>' : fmtPct(r.myCagr1_5), 'num c-mine');
     html += sumCell('cagr6_10', fmtPct(r.cagr6_10), 'num c-mine');
@@ -959,28 +994,28 @@
 
   function renderSummary() {
     var all = summaryRows();
-    var withImplied = all.filter(function (r) { return r.calc.impliedStatus === 'ok'; });
-    var fairOnly = all.filter(function (r) { return r.calc.impliedStatus !== 'ok'; });
+    var withPrice = all.filter(hasPrice);
+    var noPrice = all.filter(function (r) { return !hasPrice(r); });
 
-    sortSummary(withImplied);
+    sortSummary(withPrice);
 
-    $('summaryBody').innerHTML = withImplied.map(function (row) {
+    $('summaryBody').innerHTML = withPrice.map(function (row) {
       try { return summaryRowHtml(row); }
       catch (err) {
         console.error('總表這一列畫不出來', row.stock, err);
-        return '<tr class="row-error"><td colspan="11">這一列畫不出來：' + esc(err.message) + '</td></tr>';
+        return '<tr class="row-error"><td colspan="12">這一列畫不出來：' + esc(err.message) + '</td></tr>';
       }
     }).join('');
-    $('summaryWrap').hidden = withImplied.length === 0;
+    $('summaryWrap').hidden = withPrice.length === 0;
 
-    $('fairOnlyBody').innerHTML = fairOnly.map(function (row) {
+    $('fairOnlyBody').innerHTML = noPrice.map(function (row) {
       try { return fairOnlyRowHtml(row); }
       catch (err) {
         console.error('只算合理價這一列畫不出來', row.stock, err);
-        return '<tr class="row-error"><td colspan="9">這一列畫不出來：' + esc(err.message) + '</td></tr>';
+        return '<tr class="row-error"><td colspan="10">這一列畫不出來：' + esc(err.message) + '</td></tr>';
       }
     }).join('');
-    $('fairOnlySection').hidden = fairOnly.length === 0;
+    $('fairOnlySection').hidden = noPrice.length === 0;
 
     // 總表有自己的空狀態，不共用主表的 emptyState / noMatch
     var msg = '';
@@ -988,13 +1023,14 @@
     else if (all.length === 0) msg = '沒有符合目前篩選條件的股票。';
     // 第三種：有股票、也通過篩選，但一檔都反推不出隱含。上半部整張表會消失，
     // 不講一句話的話畫面就是「圖例＋一片空白＋下半部」，看起來像壞掉。
-    else if (withImplied.length === 0) msg = '這些股票都沒有填股價，反推不出市場隱含——全部列在下方「只算得出合理價」。';
+    else if (withPrice.length === 0) msg = '這些股票都還沒填現價，反推不出市場隱含。'
+      + '在下方表格的「現價」欄填一個價格，那一檔就會跳上來。';
     $('summaryEmpty').textContent = msg;
     $('summaryEmpty').hidden = !msg;
 
     // 上半部沒東西時，色階圖例沒有對應的表可看，一併收起來。
-    $('bandLegend').hidden = withImplied.length === 0;
-    renderBandLegend(withImplied);
+    $('bandLegend').hidden = withPrice.length === 0;
+    renderBandLegend(withPrice);
 
     document.querySelectorAll('#summaryTable thead th[data-sum-sort]').forEach(function (th) {
       th.classList.toggle('sorted', th.dataset.sumSort === sumSort.key);
@@ -1218,7 +1254,9 @@
       name: $('newName').value,
       market: $('newMarket').value,
       status: $('newStatus').value,
-      tags: $('newTags').value.split(',').map(function (t) { return t.trim(); }).filter(Boolean)
+      tags: $('newTags').value.split(',').map(function (t) { return t.trim(); }).filter(Boolean),
+      // 這次估值填的股價就是你剛查到的現價；留空則不動原本的現價。
+      currentPrice: v.price
     });
 
     Store.addRecord(stock.id, {
@@ -1263,11 +1301,27 @@
 
   // ---- 事件 ----
 
-  function rejectEdit(inp, rec, field, why) {
-    inp.value = inputValue(rec[field]);
+  // 還原成原值並把原因寫在 title 上。原本的提示要還回去——
+  // 不還的話那一格的說明就被錯誤訊息永久蓋掉了。
+  function rejectEdit(inp, value, why) {
+    var prev = inp.title;
+    inp.value = inputValue(value);
     inp.classList.add('rejected');
     inp.title = why;
-    setTimeout(function () { inp.classList.remove('rejected'); }, 1200);
+    setTimeout(function () { inp.classList.remove('rejected'); inp.title = prev; }, 1600);
+  }
+
+  // 現價改的是股票，不是紀錄——任何一張表上的現價格都走這裡。
+  function applyStockEdit(inp) {
+    var stock = Store.findStock(inp.dataset.stockId);
+    if (!stock) return null;
+    var nv = numOrNull(inp.value);
+    if (nv !== null && nv <= 0) {
+      rejectEdit(inp, stock.currentPrice, '現價要大於 0；沒有價可填就清空，那一檔只會算得出合理價');
+      return null;
+    }
+    Store.updateStock(stock.id, { currentPrice: nv });
+    return Store.findStock(stock.id);
   }
 
   function applyEdit(inp) {
@@ -1280,18 +1334,16 @@
     if (field === 'myCagr1_5' || field === 'price') {
       var nv = numOrNull(inp.value);
       if (nv !== null && field === 'price' && nv <= 0) {
-        rejectEdit(inp, rec, field, '股價要大於 0；只算合理價的話把它清空即可');
+        rejectEdit(inp, rec[field], '股價要大於 0；只算合理價的話把它清空即可');
         return null;
       }
-      inp.title = '';
       patch[field] = nv;
     } else {
       var v = numOrNull(inp.value);
       if (v === null || (field === 'eps' && v <= 0)) {
-        rejectEdit(inp, rec, field, field === 'eps' ? 'EPS 必須大於 0' : '請輸入數字');
+        rejectEdit(inp, rec[field], field === 'eps' ? 'EPS 必須大於 0' : '請輸入數字');
         return null;
       }
-      inp.title = '';
       patch[field] = v;
     }
     Store.updateRecord(rec.id, patch);
@@ -1400,14 +1452,35 @@
       if (tr) selectStock(tr.dataset.stock);
     });
 
-    // 主表：就地編輯最新一筆
-    $('stockBody').addEventListener('change', function (e) {
+    // 就地編輯。跟上面的 click 一樣委派在 .shell：綁在 #stockBody 的話，
+    // 總表裡的輸入框會變成「改了不會存」的死欄位。
+    document.querySelector('.shell').addEventListener('change', function (e) {
       var inp = e.target;
-      if (!inp.dataset || !inp.dataset.field) return;
+      if (!inp.dataset) return;
+      var inMain = !!inp.closest('#stockBody');
+
+      if (inp.dataset.stockField === 'currentPrice') {
+        var stock = applyStockEdit(inp);
+        if (!stock) return;
+        if (inMain) {
+          // 主表只刷那一列：整表重建會把焦點與手機卡片的展開狀態弄丟。
+          var mrec = Store.latestRecord(stock.id);
+          if (mrec) refreshMainRow(inp.closest('tr'), mrec, stock);
+          renderSummary();
+        } else {
+          // 總表：填了現價那一列會從下半部移到上半部，只刷一格不夠。
+          render();
+        }
+        renderStorageWarning();
+        return;
+      }
+
+      if (!inp.dataset.field) return;
       var rec = applyEdit(inp);
       if (!rec) return;
-      refreshMainRow(inp.closest('tr'), rec);
+      if (inMain) refreshMainRow(inp.closest('tr'), rec, Store.findStock(rec.stockId));
       renderDetail();
+      renderSummary();        // 改 EPS 會連帶改總表，先前漏了這一句
       renderStorageWarning();
     });
 

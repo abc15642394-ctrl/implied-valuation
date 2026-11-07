@@ -1205,10 +1205,16 @@ input[readonly], select:disabled {
 }
 
 /* 窄桌機（769–1023px）：主表加了星號後會溢出 45px。
-   「狀態」本來就能篩選、分頁表裡也看得到，是這裡最適合讓位的一欄。 */
+   「狀態」本來就能篩選、分頁表裡也看得到，是這裡最適合讓位的一欄。
+   隱含總表 12 欄在 1024px 的餘裕剛好是 0，再窄就會溢出 83px；
+   「當時股價」只是對照用，分頁表裡每一筆都看得到，讓它先退。
+   「現價」是這張表的輸入欄，任何寬度都不能藏。 */
 @media (min-width: 769px) and (max-width: 1023px) {
   #stockTable th[data-sort="status"],
   #stockTable td[data-col="status"] { display: none; }
+
+  #summaryTable th[data-sum-sort="price"],
+  #summaryTable td[data-col="price"] { display: none; }
 }
 
 /* ---- 分頁切換 ---- */
@@ -1376,10 +1382,32 @@ input[readonly], select:disabled {
 
 #summaryTable .na, #fairOnlyTable .na { color: var(--muted); font-weight: 500; font-size: .78rem; }
 
+/* 下半部的「現價」是這張表的行動呼籲，不是一般的就地編輯：
+   其他格都是唯讀，框不畫出來的話根本看不出這裡可以填。 */
+#fairOnlyTable td[data-col="currentPrice"] input {
+  border-color: var(--brand-2);
+  background: var(--surface);
+}
+#fairOnlyTable td[data-col="currentPrice"] input::placeholder {
+  color: var(--muted);
+  font-size: .78em;
+}
+
 .fair-only { margin-top: 18px; border-left: 4px solid var(--c-mine); }
 .fair-only .sec-title { color: var(--text); font-size: .95rem; }
 
 /* ---- 手機：總表自己的卡片規則（不沿用主表的） ---- */
+
+/* 窄桌機的總表：藏掉「當時股價」之後還差 22px。內距與字級各收一點點。
+   這一塊必須放在上面那些總表基礎樣式「之後」——同樣特異度下先寫的會被蓋掉，
+   寫在前面那個 769–1023px 區塊裡是沒有作用的。 */
+@media (min-width: 769px) and (max-width: 1023px) {
+  #summaryTable, #fairOnlyTable { font-size: .76rem; }
+  #summaryTable th, #summaryTable td,
+  #fairOnlyTable th, #fairOnlyTable td { padding-left: 4px; padding-right: 4px; }
+  #summaryTable td input, #fairOnlyTable td input { width: 54px; }
+  .sum-actions .pill { margin-right: 2px; }
+}
 
 @media (max-width: 768px) {
   .tabs { margin-bottom: 10px; }

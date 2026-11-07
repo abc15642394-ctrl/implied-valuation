@@ -113,6 +113,12 @@
     return out;
   }
 
+  // 股價一律「0 或空值＝沒填」。股價不可能真的是 0，存成 0 只會讓反推算出假數字。
+  function priceOrNull(v) {
+    var n = numOrNull(v);
+    return (n === null || n === 0) ? null : n;
+  }
+
   function normalizeStock(raw) {
     return {
       id: typeof raw.id === 'string' && raw.id ? raw.id : newId('st_'),
@@ -122,7 +128,12 @@
       status: raw.status === 'held' ? 'held' : 'watch',
       tags: cleanTags(raw.tags),
       starred: raw.starred === true,
-      starNote: String(raw.starNote || '')
+      starNote: String(raw.starNote || ''),
+      // 現價＝今天的價，存在股票上，跟每一筆紀錄的「當時股價」是兩回事。
+      // 這裡刻意分「沒有這個 key」與「key 在但值是 null」：前者是加現價之前的
+      // 舊資料，要從紀錄帶入；後者是使用者自己清空的，再帶入就等於清不掉。
+      // undefined 會被 JSON.stringify 丟掉、null 會留著，剛好對應這兩種狀態。
+      currentPrice: ('currentPrice' in raw) ? priceOrNull(raw.currentPrice) : undefined
     };
   }
 
@@ -135,7 +146,7 @@
       // 股價可以留空：「只用自己的成長率算合理價」是完全合理的用法，
       // 那種紀錄算不出市場隱含，但合理價與永續佔比都算得出來。
       // 舊資料裡存成 0 的，是先前把空值硬塞 0 的產物——股價不可能真的是 0，一律視為未填。
-      price: (function (v) { var n = numOrNull(v); return (n === null || n === 0) ? null : n; })(raw.price),
+      price: priceOrNull(raw.price),
       eps: num(raw.eps, 0),
       myCagr1_5: numOrNull(raw.myCagr1_5),
       cagr6_10: num(raw.cagr6_10, defaults.defaultCagr6_10),
@@ -234,6 +245,21 @@
       out.records = m.records;
     }
 
+    // 沒有現價欄位的舊資料：用它最近一筆有股價的紀錄帶入，這樣升級後
+    // 主表與隱含總表看到的數字跟升級前一模一樣，不會突然全部變成「未填」。
+    out.stocks.forEach(function (s) {
+      if (s.currentPrice !== undefined) return;
+      var newest = null;
+      out.records.forEach(function (r) {
+        if (r.stockId !== s.id || !(r.price > 0)) return;
+        if (!newest || r.date > newest.date
+            || (r.date === newest.date && (r.createdAt || '') > (newest.createdAt || ''))) {
+          newest = r;
+        }
+      });
+      s.currentPrice = newest ? newest.price : null;
+    });
+
     out.lastExportAt = incoming && typeof incoming.lastExportAt === 'string' ? incoming.lastExportAt : null;
     return out;
   }
@@ -294,9 +320,14 @@
       existing.name = incoming.name || existing.name;
       existing.status = incoming.status;
       if (incoming.tags.length) existing.tags = incoming.tags;
+      // 這次估值填了股價＝你剛查到的價，就是現價；留空則不動原本的現價。
+      if (incoming.currentPrice !== undefined && incoming.currentPrice !== null) {
+        existing.currentPrice = incoming.currentPrice;
+      }
       persist();
       return existing;
     }
+    if (incoming.currentPrice === undefined) incoming.currentPrice = null;
     state.stocks.push(incoming);
     persist();
     return incoming;
@@ -377,6 +408,15 @@
   function latestRecord(stockId) {
     var list = recordsOf(stockId);
     return list.length ? list[0] : null;
+  }
+
+  // 最近一筆真的有抄股價的紀錄。只算合理價的那些紀錄沒有股價，要跳過。
+  function latestPricedRecord(stockId) {
+    var list = recordsOf(stockId);
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].price > 0) return list[i];
+    }
+    return null;
   }
 
   function countOf(stockId) {
@@ -497,6 +537,12 @@
       } else {
         if (s.name) target.name = s.name;
         if (s.tags.length) target.tags = cleanTags(target.tags.concat(s.tags));
+        // 這裡是逐欄列舉的，新欄位沒補進來就會在匯入時無聲消失。
+        // 本機已經有現價就不覆蓋——本機那個通常才是你最近改的。
+        if (s.currentPrice !== null && s.currentPrice !== undefined
+            && (target.currentPrice === null || target.currentPrice === undefined)) {
+          target.currentPrice = s.currentPrice;
+        }
       }
       p.data.records
         .filter(function (r) { return r.stockId === s.id; })
@@ -553,6 +599,7 @@
     removeRecord: removeRecord,
     recordsOf: recordsOf,
     latestRecord: latestRecord,
+    latestPricedRecord: latestPricedRecord,
     countOf: countOf,
     allTags: allTags,
     toggleStar: toggleStar,
