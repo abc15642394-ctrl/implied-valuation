@@ -1128,6 +1128,11 @@ input[readonly], select:disabled {
 }
 
 .star:hover { color: var(--warn); filter: none; }
+
+/* AI 試算頁的星號是唯讀顯示：它寫的是真實股票的標記，不該在那一頁被改。 */
+.star.static { cursor: default; }
+.star.static:hover { color: var(--line); }
+.star.static.on, .star.static.on:hover { color: #e8a800; }
 .star.on { color: #e8a800; }
 
 @media (prefers-color-scheme: dark) {
@@ -1223,10 +1228,6 @@ input[readonly], select:disabled {
   #summaryTable th[data-sum-sort="price"],
   #summaryTable td[data-col="price"] { display: none; }
 
-  /* AI insight 12 欄在這個寬度還差 28–79px。「估值日期」在追蹤清單與
-     隱含總表都看得到，是這張表裡最適合讓位的一欄。 */
-  #aiTable th[data-ai-sort="date"],
-  #aiTable td[data-col="date"] { display: none; }
 }
 
 /* ---- 分頁切換 ---- */
@@ -1405,7 +1406,10 @@ input[readonly], select:disabled {
 /* 還沒填的現價是行動呼籲，不是一般的就地編輯：其他格都是唯讀，
    框不畫出來根本看不出這裡可以填。用 :placeholder-shown 判斷「現在是空的」，
    只有給了 placeholder 的那幾格會亮——主表的現價框沒有 placeholder，不受影響。 */
-.sum-table td[data-col="currentPrice"] input:placeholder-shown {
+/* 只有現價與 EPS 空著才亮藍框：這兩個一空，本益比、市場隱含、合理價
+   全都算不出來。備註與合理區間空著是常態，全部亮起來只會變成雜訊。 */
+.sum-table td[data-col="currentPrice"] input:placeholder-shown,
+.sum-table td[data-col="eps"] input.ai-in:placeholder-shown {
   border-color: var(--brand-2);
   background: var(--surface);
 }
@@ -1430,6 +1434,53 @@ input[readonly], select:disabled {
   resize: vertical;
 }
 
+/* AI 表 13 欄，比另外兩張都寬，1024px 就已經差 67px。「估值日期」在追蹤清單
+   與隱含總表都看得到，而且它的輸入框在展開區裡，是這張表最適合讓位的一欄。 */
+@media (min-width: 769px) and (max-width: 1100px) {
+  #aiTable th[data-ai-sort="date"],
+  #aiTable td[data-col="date"] { display: none; }
+}
+
+/* ---- AI insight：試算沙盒 ---- */
+
+/* 被你改過的格子要看得出來，否則分不清眼前的數字是真的還是試算的。 */
+.sum-table td input.ai-in.edited {
+  border-color: var(--c-mine);
+  background: var(--surface);
+  font-weight: 700;
+}
+.edited-val {
+  border-bottom: 2px solid var(--c-mine);
+  font-weight: 700;
+}
+
+#aiTable tbody tr > td[data-col="ticker"] { cursor: pointer; }
+#aiTable .caret { color: var(--muted); font-size: .7rem; margin-left: 6px; }
+
+/* 合理區間：兩個小框 ＋ 現價落在區間下方／內／上方的訊號色 */
+.range-box { display: inline-flex; align-items: center; gap: 2px; justify-content: flex-end; }
+.range-box i { font-style: normal; color: var(--muted); }
+.sum-table td input.ai-in.r { width: 46px; }
+.range-box.good input.ai-in { border-color: var(--good); }
+.range-box.bad input.ai-in { border-color: var(--bad); }
+
+/* 展開的試算區。這一列是單一 colspan 儲存格，手機的卡片規則會把它吃成
+   一張只佔半欄的怪卡片，所以下面手機區塊要明確覆寫成 block。 */
+/* 表格整體是 white-space: nowrap，展開區會繼承到——裡面那段說明不換行，
+   整張表的最小寬度就被它綁架（實測 769px 下從 735 被撐到 808）。 */
+.ai-expand > td { background: var(--bg); padding: 10px 12px 12px; white-space: normal; }
+.ai-expand-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 14px;
+}
+.ai-f { display: flex; flex-direction: column; margin: 0; font-size: .76rem; }
+.ai-f .k { color: var(--muted); }
+.ai-f .field { margin-top: 2px; }
+.sum-table .ai-f input.ai-in { width: 100%; text-align: left; border-color: var(--line); }
+.ai-f .real { color: var(--muted); font-size: .7rem; margin-top: 2px; }
+.ai-expand .hint { margin: 8px 0 0; }
+
 /* 備註是這三張表裡唯一的文字欄：讓它吃掉剩下的寬度，其餘欄維持 nowrap。 */
 .sum-table td[data-col="note"] { min-width: 120px; }
 .sum-table td[data-col="note"] input { width: 100%; min-width: 0; text-align: left; }
@@ -1445,6 +1496,15 @@ input[readonly], select:disabled {
   .sum-table th, .sum-table td { padding-left: 4px; padding-right: 4px; }
   .sum-table td input { width: 54px; }
   .sum-table td[data-col="note"] { min-width: 70px; }
+
+  /* AI 表在這個寬度是 13 欄裡最擠的一張：輸入框、區間、備註、按鈕各收一點，
+     好過再藏掉一整欄。市場徽章讓位——市場本來就能從上面的篩選看與選。 */
+  #aiTable td input.ai-in { width: 46px; }
+  #aiTable td input.ai-in.r { width: 34px; }
+  #aiTable td[data-col="note"] { min-width: 56px; }
+  #aiTable .sum-actions .pill { padding: 3px 7px; }
+  #aiTable .mkt { display: none; }
+  #aiTable .caret { margin-left: 3px; }
   .sum-actions .pill { margin-right: 2px; }
 }
 
@@ -1518,6 +1578,20 @@ input[readonly], select:disabled {
 
   .sum-table tbody td[data-col="actions"] { justify-content: flex-end; margin-top: 4px; }
   .sum-table tbody td[data-col="actions"]::before { display: none; }
+
+  /* 展開列：上面那兩條會把它變成一張只佔半欄的怪卡片。改回 block，
+     並且在視覺上黏在它上面那張卡片下緣，不要看起來像另一檔股票。 */
+  #aiTable tbody tr.ai-expand {
+    display: block;
+    margin-top: -10px;
+    margin-bottom: 10px;
+    border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+    padding: 0;
+  }
+  #aiTable tbody tr.ai-expand > td { display: block; width: auto; }
+  #aiTable tbody tr.ai-expand > td::before { display: none; }
+  #aiTable tbody tr.expanded { margin-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; }
 
   .fair-only { border-left-width: 3px; }
 }

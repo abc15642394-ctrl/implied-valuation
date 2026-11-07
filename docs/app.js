@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 12;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 13;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -20,6 +20,7 @@
   var activeTab = 'list';
   var sumSort = { key: 'implied', dir: 'asc' };   // 預設最便宜的排最上面
   var aiSort = { key: 'gap', dir: 'asc' };        // 跟主表一樣，訊號欄是落差
+  var aiExpanded = {};                            // AI 試算頁展開中的列
   var editingRecordId = null;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -117,33 +118,36 @@
 
   // 本益比＝現價 ÷ EPS。刻意不塞進 computeRecord——那支是 DCF，
   // 本益比跟折現、成長假設一點關係都沒有。
-  function peOf(stock, rec) {
-    if (!stock || !rec) return null;
-    if (!(stock.currentPrice > 0) || !(rec.eps > 0)) return null;
-    return stock.currentPrice / rec.eps;
+  // 一律收原始值，不收 stock / rec：沙盒頁用的是另一組數字，
+  // 函式認物件的話那一頁就得另寫一份，兩份遲早會講不一樣的話。
+  function peOf(price, eps) {
+    if (!(price > 0) || !(eps > 0)) return null;
+    return price / eps;
   }
 
   // 算不出本益比只有兩種原因，而且要自己講。借用 statusMessage() 的話，
   // 它回的是二分搜尋的狀態（超出上限／低於下限），貼到本益比那格就是一句假話。
   // 合理價是 EPS ＋「我估 1-5 年」的產物，兩個缺哪一個要講清楚哪一個。
   // 先前這裡一律寫「未估 1-5 年」，EPS ≤ 0 的那檔明明估了卻被說成沒估。
-  function fairReason(rec) {
-    if (!rec || !(rec.eps > 0)) return 'EPS ≤ 0，不適用';
-    if (rec.myCagr1_5 === null || !isFinite(rec.myCagr1_5)) return '未估 1-5 年';
+  function fairReason(eps, myCagr) {
+    if (eps === null || eps === undefined) return '未填 EPS';
+    if (!(eps > 0)) return 'EPS ≤ 0，不適用';
+    if (myCagr === null || !isFinite(myCagr)) return '未估 1-5 年';
     return '—';
   }
 
   // 上漲空間＝合理價 ÷ 現價 − 1，所以先看合理價算不算得出來，再看有沒有現價。
-  function upsideReason(stock, rec) {
-    var f = fairReason(rec);
+  function upsideReason(price, eps, myCagr) {
+    var f = fairReason(eps, myCagr);
     if (f !== '—') return f;
-    if (!stock || !(stock.currentPrice > 0)) return '未填現價';
+    if (!(price > 0)) return '未填現價';
     return '—';
   }
 
-  function peReason(stock, rec) {
-    if (!rec || !(rec.eps > 0)) return 'EPS ≤ 0，不適用';
-    if (!stock || !(stock.currentPrice > 0)) return '未填現價';
+  function peReason(price, eps) {
+    if (eps === null || eps === undefined) return '未填 EPS';
+    if (!(eps > 0)) return 'EPS ≤ 0，不適用';
+    if (!(price > 0)) return '未填現價';
     return '—';
   }
 
@@ -154,6 +158,8 @@
   function statusMessage(status, eps, price, priceLabel) {
     var pl = priceLabel || '股價';
     if (status === 'invalid') {
+      // EPS 被清空（沙盒頁才可能）跟 EPS ≤ 0 是兩回事，別講同一句話
+      if (eps === null || eps === undefined) return '未填 EPS';
       if (!(eps > 0)) return 'EPS ≤ 0，不適用';
       // 沒填價不是錯誤，只是這一筆沒有要反推市場隱含值。
       if (price === null || price === undefined) return '未填' + pl;
@@ -342,18 +348,24 @@
 
   // ---- 主表（一檔一列，顯示最新一筆） ----
 
-  function visibleRows() {
-    var st = settings();
+  // 三個分頁共用同一組篩選。先前主表與總表各寫了一份一模一樣的，
+  // 再抄第三份，遲早會有一頁的篩選條件跟別人不一樣。
+  function filteredStocks() {
     var text = filters.text.trim().toLowerCase();
-
-    var rows = Store.getState().stocks.filter(function (s) {
+    return Store.getState().stocks.filter(function (s) {
       if (filters.market && s.market !== filters.market) return false;
       if (filters.status && s.status !== filters.status) return false;
       if (text && (s.ticker + ' ' + s.name).toLowerCase().indexOf(text) === -1) return false;
       if (filters.tags.length && !filters.tags.every(function (t) { return s.tags.indexOf(t) !== -1; })) return false;
       if (filters.starred && !Store.stockHasStar(s.id)) return false;
       return true;
-    }).map(function (s) {
+    });
+  }
+
+  function visibleRows() {
+    var st = settings();
+
+    var rows = filteredStocks().map(function (s) {
       var rec = Store.latestRecord(s.id);
       return {
         stock: s,
@@ -913,15 +925,7 @@
 
   function summaryRows() {
     var st = settings();
-    return Store.getState().stocks.filter(function (s) {
-      if (filters.market && s.market !== filters.market) return false;
-      if (filters.status && s.status !== filters.status) return false;
-      var text = filters.text.trim().toLowerCase();
-      if (text && (s.ticker + ' ' + s.name).toLowerCase().indexOf(text) === -1) return false;
-      if (filters.tags.length && !filters.tags.every(function (t) { return s.tags.indexOf(t) !== -1; })) return false;
-      if (filters.starred && !Store.stockHasStar(s.id)) return false;
-      return true;
-    }).map(function (s) {
+    return filteredStocks().map(function (s) {
       var rec = Store.latestRecord(s.id);
       // 數字（EPS、我估、6-10 年、估值日期）來自最新一筆紀錄，
       // 價格來自股票層級的現價——所以「這次只算合理價」的紀錄不會讓整檔消失。
@@ -993,7 +997,9 @@
     Object.keys(SUM_LABELS).forEach(function (k) { m[k] = SUM_LABELS[k]; });
     m.fairValue = '我估的合理價';
     m.pe = '本益比';
+    m.range = '合理區間';
     m.note = '備註';
+    m.actions = '';
     return m;
   })();
 
@@ -1095,60 +1101,217 @@
     });
   }
 
-  // ---- AI insight ----
+  // ---- AI insight：獨立的試算沙盒 ----
   //
-  // 跟隱含總表共用 summaryRows()：篩選、最新一筆、用現價算的那一套完全相同，
-  // 兩張表看到的同一檔不可能對不起來。差別只在欄位與「算不出來怎麼呈現」。
+  // 這一頁跟另外兩頁只有單向關係：真實資料流進來當預設值，這一頁改的東西
+  // 絕不流出去。做法是一層 override（Store 的 aiDraft）——只記「你動過的欄位」，
+  // 沒動過的照樣跟著追蹤清單走，所以它不會慢慢變成一份越來越舊的副本。
   //
-  // 這張表刻意不做「資料不齊就整張收起來」——隱含總表那樣分上下半部，
-  // 是因為它有一個明確的下半部可以去；這裡沒有，收起來就只剩一片空白。
-  // 所以一律列出，算不出來的格子寫原因。
+  // 這一頁的輸入框一律用 data-ai-stock / data-ai-field。千萬不要重用
+  // priceCell() 或 noteCell()：那兩支發的是 data-stock-field / data-field，
+  // 會直接寫進真實股票與真實紀錄——畫面看起來有做，其實整個功能等於沒做。
 
-  function aiValue(row, key) {
-    if (key === 'pe') return peOf(row.stock, row.rec);
-    if (key === 'note') return row.rec.note || '';
-    return sumValue(row, key);
+  var AI_FIELDS = {
+    date: '估值日期', currentPrice: '現價', eps: 'EPS', myCagr1_5: '我估 1-5 年',
+    cagr6_10: '6-10 年', discountRate: '折現率', perpetualGrowth: '永續成長率', note: '備註'
+  };
+  var AI_TEXT_FIELD = { date: 'date', note: 'text' };
+
+  function aiRealValue(stock, rec, key) {
+    var st = settings();
+    switch (key) {
+      case 'date': return rec.date;
+      case 'currentPrice': return stock.currentPrice;
+      case 'eps': return rec.eps;
+      case 'myCagr1_5': return rec.myCagr1_5;
+      case 'cagr6_10': return rec.cagr6_10;
+      case 'discountRate': return st.discountRate;
+      case 'perpetualGrowth': return st.perpetualGrowth;
+      case 'note': return rec.note || '';
+      default: return null;
+    }
+  }
+
+  function aiShow(key, v) {
+    if (v === null || v === undefined || v === '') return '空白';
+    if (key === 'date' || key === 'note') return String(v);
+    if (key === 'currentPrice' || key === 'eps') return fmtNum(v);
+    return fmtPct(v);
+  }
+
+  // 疊出這一列實際要用的數字。overridden 記下哪些是你改過的——畫面要標出來，
+  // 否則你會分不清眼前這個數字是真的，還是自己剛剛試算填的。
+  function aiEffective(stock) {
+    var rec = Store.latestRecord(stock.id);
+    if (!rec) return null;
+    var d = Store.aiDraftOf(stock.id) || {};
+    var eff = { stock: stock, rec: rec, overridden: {} };
+
+    Object.keys(AI_FIELDS).forEach(function (k) {
+      if (k in d) { eff[k] = d[k]; eff.overridden[k] = true; }
+      else { eff[k] = aiRealValue(stock, rec, k); }
+    });
+    ['rangeLo', 'rangeHi'].forEach(function (k) {
+      if (k in d) { eff[k] = d[k]; eff.overridden[k] = true; } else { eff[k] = null; }
+    });
+
+    // computeRecord 只讀 eps / myCagr1_5 / cagr6_10 / price，餵一個純物件就行，
+    // 那支函式不用為了沙盒改動。
+    eff.calc = computeRecord(
+      { eps: eff.eps, myCagr1_5: eff.myCagr1_5, cagr6_10: eff.cagr6_10, price: eff.currentPrice },
+      { discountRate: eff.discountRate, perpetualGrowth: eff.perpetualGrowth },
+      eff.currentPrice);
+    eff.pe = peOf(eff.currentPrice, eff.eps);
+    return eff;
+  }
+
+  // 排序讀的必須是同一份有效值。fallback 回真實值的話，會變成
+  // 「畫面顯示沙盒數字、順序依真實數字」——看起來只是排序怪怪的，極難查。
+  function aiValue(eff, key) {
+    switch (key) {
+      case 'ticker': return eff.stock.ticker;
+      case 'name': return eff.stock.name;
+      case 'date': return eff.date;
+      case 'currentPrice': return eff.currentPrice;
+      case 'eps': return eff.eps;
+      case 'pe': return eff.pe;
+      case 'fairValue': return eff.calc.fairValue;
+      case 'implied': return eff.calc.implied;
+      case 'gap': return eff.calc.gap;
+      case 'upside': return eff.calc.upside;
+      case 'note': return eff.note || '';
+      default: return null;
+    }
   }
 
   function naCell(text) { return '<span class="na">' + esc(text) + '</span>'; }
 
-  function noteCell(rec) {
-    var hint = '改的是最新一筆（' + rec.date + '）的備註';
-    return '<td data-col="note" data-label="' + AI_LABELS.note + '">'
-      // size="1" 不是筆誤：text input 的固有寬度預設約 20 個字元，那就是
-      // 這一欄最小寬度的來源，CSS 的 width:100% 蓋不掉。實測不加這個，
-      // 整張表的最小寬度會從 976 變成 1101，連 1440px 都塞不下。
-      + '<input type="text" size="1" title="' + esc(hint) + '" placeholder="這一筆的備註"'
-      + ' data-rec="' + esc(rec.id) + '" data-field="note" value="' + esc(rec.note || '') + '"></td>';
+  function aiInput(eff, field, opts) {
+    opts = opts || {};
+    var type = AI_TEXT_FIELD[field] || 'number';
+    var on = !!eff.overridden[field];
+    var hint;
+    if (field === 'rangeLo' || field === 'rangeHi') {
+      hint = '合理區間是這一頁專屬的，追蹤清單沒有這個欄位。';
+    } else {
+      hint = on
+        ? '已改過。追蹤清單的值是「' + aiShow(field, aiRealValue(eff.stock, eff.rec, field)) + '」，改這裡不會動到它。'
+        : '可以直接改，只影響這一頁，不會動到追蹤清單與隱含總表。';
+    }
+    var v = eff[field];
+    return '<input type="' + type + '"'
+      + (type === 'number' ? ' step="any" inputmode="decimal"' : '')
+      + (type === 'text' ? ' size="1"' : '')
+      + (opts.placeholder ? ' placeholder="' + esc(opts.placeholder) + '"' : '')
+      + ' class="ai-in' + (on ? ' edited' : '') + (opts.cls ? ' ' + opts.cls : '') + '"'
+      + ' title="' + esc(hint) + '"'
+      + ' data-ai-stock="' + esc(eff.stock.id) + '" data-ai-field="' + field + '"'
+      + ' value="' + (type === 'number' ? inputValue(v) : esc(v === null || v === undefined ? '' : v)) + '">';
   }
 
-  function aiRowHtml(row) {
-    var s = row.stock, r = row.rec, c = row.calc;
-    var pe = peOf(s, r);
+  // 唯讀顯示的格子若是覆寫值，也要標出來（例如估值日期，它的輸入框在展開區）
+  function aiMark(eff, field, inner) {
+    return eff.overridden[field]
+      ? '<span class="edited-val" title="' + esc('已改過。追蹤清單的值是「'
+          + aiShow(field, aiRealValue(eff.stock, eff.rec, field)) + '」。') + '">' + inner + '</span>'
+      : inner;
+  }
+
+  // 星號在這一頁是唯讀的：它寫的是真實股票的標記，跟「這一頁改的不外流」衝突。
+  function aiStarHtml(stock) {
+    var on = stock.starred === true;
+    return '<span class="star static' + (on ? ' on' : '') + '" title="'
+      + esc(on ? (stock.starNote ? '已標記：' + stock.starNote : '已標記') : '未標記。要標記請到追蹤清單或隱含總表')
+      + '">' + (on ? '★' : '☆') + '</span>';
+  }
+
+  function aiRangeCell(eff) {
+    var lo = eff.rangeLo, hi = eff.rangeHi, p = eff.currentPrice;
+    var state = '', why = '填你自己認為合理的價格區間（這一頁專屬）';
+    if (lo !== null && hi !== null && p > 0) {
+      if (p < lo) { state = 'good'; why = '現價 ' + fmtNum(p) + ' 低於你的區間下限'; }
+      else if (p > hi) { state = 'bad'; why = '現價 ' + fmtNum(p) + ' 高於你的區間上限'; }
+      else { why = '現價 ' + fmtNum(p) + ' 落在你的區間內'; }
+    }
+    return '<span class="range-box ' + state + '" title="' + esc(why) + '">'
+      + aiInput(eff, 'rangeLo', { placeholder: '下限', cls: 'r' })
+      + '<i>–</i>'
+      + aiInput(eff, 'rangeHi', { placeholder: '上限', cls: 'r' })
+      + '</span>';
+  }
+
+  function aiResetBtn(stock) {
+    var on = Store.hasAiDraft(stock.id);
+    return '<button type="button" class="pill ghost" data-ai-reset="' + esc(stock.id) + '"'
+      + (on ? '' : ' disabled')
+      + ' title="把這一列的試算值清掉，回到追蹤清單的數字">還原</button>';
+  }
+
+  function aiExpandHtml(eff) {
+    function field(key, unit) {
+      return '<label class="ai-f"><span class="k">' + esc(AI_FIELDS[key]) + '</span>'
+        + '<span class="field">' + aiInput(eff, key) + (unit ? '<i>' + unit + '</i>' : '') + '</span>'
+        + '<span class="real">追蹤清單：' + esc(aiShow(key, aiRealValue(eff.stock, eff.rec, key))) + '</span>'
+        + '</label>';
+    }
+    // 這一列不帶 data-sum-stock：帶了的話，點展開區裡的空白處會把它自己收起來。
+    return '<tr class="ai-expand" data-ai-expand="' + esc(eff.stock.id) + '"><td colspan="13">'
+      + '<div class="ai-expand-grid">'
+      + field('date') + field('myCagr1_5', '%') + field('cagr6_10', '%')
+      + field('discountRate', '%') + field('perpetualGrowth', '%')
+      + '</div>'
+      + '<p class="hint">這些只影響這一頁的試算。折現率與永續成長率在別頁是所有股票共用的，'
+      + '在這裡可以單獨替這一檔換掉，看看換個假設合理價會長怎樣。</p>'
+      + '</td></tr>';
+  }
+
+  function aiRowHtml(eff) {
+    var s = eff.stock, c = eff.calc;
     var band = c.impliedStatus === 'ok' ? impliedBand(c.implied) : '';
+    var open = !!aiExpanded[s.id];
+
     // data-sum-stock 而不是 data-stock：帶 data-stock 的列會被主表的
     // 「點一列＝選取該檔」抓到。
-    var html = '<tr data-sum-stock="' + esc(s.id) + '">';
-    html += sumIdCell(s);
+    // 展開區裡改過的欄位，收起來之後主列是看不出來的——合理價跟追蹤清單不一樣
+    // 卻沒有任何記號，等於一張會誤導人的表。所以把記號打在那個小箭頭上。
+    var hidden = ['date', 'myCagr1_5', 'cagr6_10', 'discountRate', 'perpetualGrowth']
+      .filter(function (k) { return eff.overridden[k]; })
+      .map(function (k) { return AI_FIELDS[k]; });
+
+    var html = '<tr data-sum-stock="' + esc(s.id) + '"' + (open ? ' class="expanded"' : '') + '>';
+    html += aiCell('ticker', aiStarHtml(s) + '<strong>' + esc(s.ticker || '（無代號）') + '</strong>'
+      + ' <span class="mkt">' + (s.market === 'US' ? 'US' : 'TW') + '</span>'
+      + '<span class="caret' + (hidden.length ? ' edited-val' : '') + '" title="'
+      + esc(hidden.length ? '展開區裡改過：' + hidden.join('、') : '點一下展開試算區')
+      + '">' + (open ? '▴' : '▾') + '</span>');
     html += aiCell('name', '<span class="ellip" title="' + esc(s.name) + '">' + esc(s.name) + '</span>');
-    html += aiCell('date', '<span title="' + esc(r.date) + '">' + esc(shortDate(r.date)) + '</span>');
-    html += priceCell(s, 'currentPrice', AI_LABELS.currentPrice, 'c-fact', '填現價');
-    html += aiCell('eps', fmtNum(r.eps), 'num c-fact');
-    html += aiCell('pe', pe === null ? naCell(peReason(s, r)) : fmtNum(pe), 'num c-fact');
-    html += aiCell('fairValue', c.fairValue === null ? naCell(fairReason(r)) : fmtNum(c.fairValue), 'num c-mine');
+    html += aiCell('date', aiMark(eff, 'date',
+      '<span title="' + esc(eff.date || '') + '">' + esc(eff.date ? shortDate(eff.date) : '—') + '</span>'));
+    html += aiCell('currentPrice', aiInput(eff, 'currentPrice', { placeholder: '填現價' }), 'num c-fact');
+    html += aiCell('eps', aiInput(eff, 'eps', { placeholder: '填 EPS' }), 'num c-fact');
+    html += aiCell('pe', eff.pe === null
+      ? naCell(peReason(eff.currentPrice, eff.eps)) : fmtNum(eff.pe), 'num c-fact');
+    html += aiCell('range', aiRangeCell(eff), 'num c-mine');
+    html += aiCell('fairValue', c.fairValue === null
+      ? naCell(fairReason(eff.eps, eff.myCagr1_5)) : fmtNum(c.fairValue), 'num c-mine');
     html += aiCell('implied', c.impliedStatus === 'ok'
       ? '<span class="band-val">' + fmtPct(c.implied) + '</span>'
-      : naCell(statusMessage(c.impliedStatus, r.eps, s.currentPrice, '現價')),
+      : naCell(statusMessage(c.impliedStatus, eff.eps, eff.currentPrice, '現價')),
       'num ' + (band ? 'band ' + band : 'c-market'));
     html += aiCell('gap', gapHtml(c), 'num');
-    html += aiCell('upside', c.upside === null ? naCell(upsideReason(s, r)) : fmtSigned(c.upside, 1, '%'), 'num c-mine');
-    html += noteCell(r);
-    html += aiCell('actions', sumActions(r), 'sum-actions');
-    return html + '</tr>';
+    html += aiCell('upside', c.upside === null
+      ? naCell(upsideReason(eff.currentPrice, eff.eps, eff.myCagr1_5))
+      : fmtSigned(c.upside, 1, '%'), 'num c-mine');
+    html += aiCell('note', aiInput(eff, 'note', { placeholder: '只存在這一頁' }));
+    html += aiCell('actions', aiResetBtn(s), 'sum-actions');
+    html += '</tr>';
+
+    if (open) html += aiExpandHtml(eff);
+    return html;
   }
 
   function aiRows() {
-    var rows = summaryRows();
+    var rows = filteredStocks().map(aiEffective).filter(function (r) { return !!r; });
     sortBy(rows, aiSort, aiValue);
     return rows;
   }
@@ -1156,17 +1319,23 @@
   function renderAi() {
     var rows = aiRows();
 
-    $('aiBody').innerHTML = rows.map(function (row) {
-      try { return aiRowHtml(row); }
+    // 展開狀態只保留還在畫面上的，不然刪掉或篩掉的股票會一直累積在這裡
+    var alive = {};
+    rows.forEach(function (r) { alive[r.stock.id] = true; });
+    Object.keys(aiExpanded).forEach(function (id) { if (!alive[id]) delete aiExpanded[id]; });
+
+    $('aiBody').innerHTML = rows.map(function (eff) {
+      try { return aiRowHtml(eff); }
       catch (err) {
-        console.error('AI insight 這一列畫不出來', row.stock, err);
-        return '<tr class="row-error"><td colspan="12">這一列畫不出來：' + esc(err.message) + '</td></tr>';
+        console.error('AI insight 這一列畫不出來', eff.stock, err);
+        return '<tr class="row-error"><td colspan="13">這一列畫不出來：' + esc(err.message) + '</td></tr>';
       }
     }).join('');
 
     // 只有「真的一列都沒有」才收表——不是「有些欄位算不出來」就收。
     $('aiWrap').hidden = rows.length === 0;
     $('aiCopy').disabled = rows.length === 0;
+    $('aiResetAll').disabled = Store.countAiDrafts() === 0;
 
     var msg = '';
     if (Store.getState().stocks.length === 0) msg = '還沒有追蹤任何股票。上面算完後按「加入追蹤」。';
@@ -1180,53 +1349,108 @@
     });
   }
 
+  // ---- 沙盒的寫入 ----
+
+  function applyAiEdit(inp) {
+    var id = inp.dataset.aiStock;
+    var field = inp.dataset.aiField;
+    var eff = null;
+    var stock = Store.findStock(id);
+    if (!stock) return false;
+    eff = aiEffective(stock);
+    if (!eff) return false;
+
+    var isText = !!AI_TEXT_FIELD[field];
+    var v = isText ? String(inp.value) : numOrNull(inp.value);
+
+    if (!isText && v !== null) {
+      if ((field === 'currentPrice' || field === 'eps' || field === 'rangeLo' || field === 'rangeHi') && v <= 0) {
+        rejectEdit(inp, eff[field], (AI_FIELDS[field] || '這個數字') + '要大於 0；不想填就清空。');
+        return false;
+      }
+      // 折現率必須大於永續成長率，否則永續價值公式會算出無限大或負數。
+      var dr = field === 'discountRate' ? v : eff.discountRate;
+      var pg = field === 'perpetualGrowth' ? v : eff.perpetualGrowth;
+      if ((field === 'discountRate' || field === 'perpetualGrowth') && !(dr > pg)) {
+        rejectEdit(inp, eff[field], '折現率（' + dr + '%）必須大於永續成長率（' + pg + '%）。');
+        return false;
+      }
+      var lo = field === 'rangeLo' ? v : eff.rangeLo;
+      var hi = field === 'rangeHi' ? v : eff.rangeHi;
+      if ((field === 'rangeLo' || field === 'rangeHi') && lo !== null && hi !== null && !(lo < hi)) {
+        rejectEdit(inp, eff[field], '區間下限（' + lo + '）要小於上限（' + hi + '）。');
+        return false;
+      }
+    }
+
+    // 只寫沙盒。這裡絕對不能出現 updateStock / updateRecord。
+    Store.setAiDraftField(id, field, isText && v === '' ? null : v);
+    return true;
+  }
+
+  function toggleAiExpand(stockId) {
+    if (aiExpanded[stockId]) { delete aiExpanded[stockId]; } else { aiExpanded[stockId] = true; }
+    renderAi();
+  }
+
   // ---- 複製給 AI ----
 
   // Markdown 表格的欄位分隔是 |，備註裡出現 | 會把整列切歪。
   function mdCell(text) { return String(text === null || text === undefined ? '' : text).replace(/\|/g, '\\|'); }
 
-  function aiCopyValues(row) {
-    var s = row.stock, r = row.rec, c = row.calc;
-    var pe = peOf(s, r);
+  var AI_COPY_HEAD = ['代號', '名稱', '估值日期', '現價', 'EPS', '本益比', '我的合理區間',
+    '我估的合理價', '市場隱含', '落差', '上漲空間', '我估 1-5 年', '6-10 年',
+    '折現率', '永續成長率', '備註'];
+
+  function aiCopyValues(eff) {
+    var c = eff.calc;
+    var range = (eff.rangeLo === null && eff.rangeHi === null) ? '未填'
+      : (eff.rangeLo === null ? '？' : fmtNum(eff.rangeLo)) + '–'
+        + (eff.rangeHi === null ? '？' : fmtNum(eff.rangeHi));
     return [
-      s.ticker || '（無代號）',
-      s.name || '',
-      r.date,
-      s.currentPrice > 0 ? fmtNum(s.currentPrice) : '未填現價',
-      fmtNum(r.eps),
-      pe === null ? peReason(s, r) : fmtNum(pe),
-      c.fairValue === null ? fairReason(r) : fmtNum(c.fairValue),
-      c.impliedStatus === 'ok' ? fmtPct(c.implied) : statusMessage(c.impliedStatus, r.eps, s.currentPrice, '現價'),
+      eff.stock.ticker || '（無代號）',
+      eff.stock.name || '',
+      eff.date || '未填',
+      eff.currentPrice > 0 ? fmtNum(eff.currentPrice) : '未填現價',
+      eff.eps === null ? '未填 EPS' : fmtNum(eff.eps),
+      eff.pe === null ? peReason(eff.currentPrice, eff.eps) : fmtNum(eff.pe),
+      range,
+      c.fairValue === null ? fairReason(eff.eps, eff.myCagr1_5) : fmtNum(c.fairValue),
+      c.impliedStatus === 'ok' ? fmtPct(c.implied)
+        : statusMessage(c.impliedStatus, eff.eps, eff.currentPrice, '現價'),
       c.gap === null ? '算不出來' : fmtSigned(c.gap, 2, 'pp'),
-      c.upside === null ? upsideReason(s, r) : fmtSigned(c.upside, 1, '%'),
-      r.myCagr1_5 === null ? '未估' : fmtPct(r.myCagr1_5),
-      fmtPct(r.cagr6_10),
-      r.note || ''
+      c.upside === null ? upsideReason(eff.currentPrice, eff.eps, eff.myCagr1_5)
+        : fmtSigned(c.upside, 1, '%'),
+      eff.myCagr1_5 === null ? '未估' : fmtPct(eff.myCagr1_5),
+      fmtPct(eff.cagr6_10),
+      fmtPct(eff.discountRate),
+      fmtPct(eff.perpetualGrowth),
+      eff.note || ''
     ];
   }
 
-  var AI_COPY_HEAD = ['代號', '名稱', '估值日期', '現價', 'EPS', '本益比', '我估的合理價',
-    '市場隱含', '落差', '上漲空間', '我估 1-5 年', '6-10 年', '備註'];
-
-  // 多帶「我估 1-5 年／6-10 年」與共用假設：少了它們，AI 看到一個「合理價」
-  // 根本無從判斷它是怎麼算出來的，只能照單全收。算不出來的一律寫原因，
-  // 不留空白——留空會被當成 0。
+  // 多帶「我估 1-5 年／6-10 年」與逐列的折現率、永續成長率：少了它們，
+  // AI 看到一個「合理價」根本無從判斷它是怎麼算出來的。折現率與永續成長率
+  // 現在可以單檔覆寫，所以必須逐列列出，不能再寫一句「共用假設」。
   function aiClipboardText(rows) {
-    var st = settings();
+    var edited = rows.filter(function (r) { return Store.hasAiDraft(r.stock.id); }).length;
     var out = [];
     out.push('# 我的股票估值表（' + Store.today() + '）');
     out.push('');
+    if (edited) {
+      out.push('> 注意：以下有 ' + edited + ' 檔的數字是我在試算頁調整過的，不等於我追蹤清單裡的原始紀錄。');
+      out.push('');
+    }
     out.push('估值模型：EPS 兩段式折現。第 1-5 年用「我估 1-5 年」的成長率，第 6-10 年用「6-10 年」的成長率，'
-      + '第 10 年之後以永續成長率延續，全部折現回現值。');
-    out.push('共用假設：折現率 ' + st.discountRate + '%、永續成長率 ' + st.perpetualGrowth + '%（所有股票共用）。');
+      + '第 10 年之後以永續成長率延續，全部折現回現值。每一檔實際用的折現率與永續成長率列在表內。');
     out.push('市場隱含＝用現價反推出「市場正在假設的 1-5 年成長率」。落差＝市場隱含 − 我估 1-5 年，負值代表市場的要求比我低。');
-    out.push('本益比＝現價 ÷ EPS，EPS 是我自己填的，可能是預估值。');
+    out.push('本益比＝現價 ÷ EPS，EPS 是我自己填的，可能是預估值。「我的合理區間」是我自己判斷的價格區間，不是算出來的。');
     out.push('欄位若寫著「未填現價」「未估 1-5 年」等字樣，代表那個數字算不出來，不要當成 0。');
     out.push('');
     out.push('| ' + AI_COPY_HEAD.join(' | ') + ' |');
     out.push('|' + AI_COPY_HEAD.map(function () { return '---'; }).join('|') + '|');
-    rows.forEach(function (row) {
-      out.push('| ' + aiCopyValues(row).map(mdCell).join(' | ') + ' |');
+    rows.forEach(function (eff) {
+      out.push('| ' + aiCopyValues(eff).map(mdCell).join(' | ') + ' |');
     });
     out.push('');
     out.push('以上 ' + rows.length + ' 檔'
@@ -1571,12 +1795,6 @@
     var rec = Store.findRecord(inp.dataset.rec);
     if (!rec) return null;
 
-    // 備註是文字：清空是正常的，沒有數字可驗。
-    if (field === 'note') {
-      Store.updateRecord(rec.id, { note: String(inp.value) });
-      return Store.findRecord(rec.id);
-    }
-
     var patch = {};
     // 這兩個欄位清空是有意義的：我估＝未估、股價＝這一筆沒記股價（只算合理價）。
     if (field === 'myCagr1_5' || field === 'price') {
@@ -1694,6 +1912,22 @@
         return;
       }
 
+      var aiReset = e.target.closest('[data-ai-reset]');
+      if (aiReset) {
+        e.stopPropagation();
+        Store.clearAiDraft(aiReset.dataset.aiReset);
+        renderAi();
+        return;
+      }
+
+      // AI 試算頁：點一列展開／收合試算區。要排在下面那句提早 return 之前，
+      // 否則點在儲存格上也會被它攔掉。展開列不帶 data-sum-stock，所以
+      // 點展開區裡的空白處不會把它自己收起來。
+      if (!e.target.closest('input, button, label, a')) {
+        var aiTr = e.target.closest('#aiBody tr[data-sum-stock]');
+        if (aiTr) { toggleAiExpand(aiTr.dataset.sumStock); return; }
+      }
+
       // 點主表的列＝選取該檔（總表的列不帶 data-stock，所以不會誤觸）
       if (e.target.closest('input, button')) return;
       var tr = e.target.closest('#stockBody tr[data-stock]');
@@ -1705,6 +1939,15 @@
     document.querySelector('.shell').addEventListener('change', function (e) {
       var inp = e.target;
       if (!inp.dataset) return;
+
+      // AI 試算頁。必須排在另外兩條之前，而且那一頁的輸入框絕對不帶
+      // data-stock-field / data-field——帶了就會掉進寫真實資料的分支。
+      if (inp.dataset.aiField) {
+        if (applyAiEdit(inp)) renderAi();
+        renderStorageWarning();
+        return;
+      }
+
       var inMain = !!inp.closest('#stockBody');
 
       if (inp.dataset.stockField === 'currentPrice') {
@@ -1727,9 +1970,6 @@
       if (!inp.dataset.field) return;
       var rec = applyEdit(inp);
       if (!rec) return;
-      // 備註不影響任何其他欄位。重畫 AI 表只會在每次失焦時白閃一下，
-      // 而且使用者正在那一格裡打字。
-      if (inp.dataset.field === 'note') { renderDetail(); renderStorageWarning(); return; }
       if (inMain) refreshMainRow(inp.closest('tr'), rec, Store.findStock(rec.stockId));
       renderDetail();
       renderSummary();        // 改 EPS 會連帶改總表，先前漏了這一句
@@ -1807,6 +2047,14 @@
     });
 
     $('aiCopy').addEventListener('click', copyForAi);
+
+    $('aiResetAll').addEventListener('click', function () {
+      var n = Store.countAiDrafts();
+      if (!n) return;
+      if (!confirm('把 ' + n + ' 檔的試算值全部清掉，回到追蹤清單的數字？這不會動到你的真實資料。')) return;
+      Store.clearAllAiDrafts();
+      renderAi();
+    });
 
     $('filterStar').addEventListener('click', function () {
       filters.starred = !filters.starred;

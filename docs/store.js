@@ -22,6 +22,8 @@
       settings: { discountRate: 10, perpetualGrowth: 2, defaultCagr6_10: 5, bands: DEFAULT_BANDS.slice() },
       stocks: [],
       records: [],
+      // AI insight 是試算沙盒：只存「被改過的欄位」，沒有的欄位代表跟著真實資料走。
+      aiDraft: {},
       lastExportAt: null
     };
   }
@@ -117,6 +119,26 @@
   function priceOrNull(v) {
     var n = numOrNull(v);
     return (n === null || n === 0) ? null : n;
+  }
+
+  // AI 試算沙盒允許覆寫的欄位。白名單是為了讓外來檔案塞不進奇怪的 key。
+  // date 與 note 是字串，其餘都是數字；rangeLo / rangeHi 是沙盒專屬，
+  // 真實資料沒有對應欄位。
+  var AI_DRAFT_KEYS = ['date', 'currentPrice', 'eps', 'myCagr1_5', 'cagr6_10',
+    'discountRate', 'perpetualGrowth', 'note', 'rangeLo', 'rangeHi'];
+  var AI_DRAFT_TEXT = { date: true, note: true };
+
+  // key 在不在＝有沒有被覆寫。所以「清空」（值是 null）跟「從來沒改過」
+  // （key 不存在）必須分得開；混在一起的話，你清掉的格子重整後會自己長回來。
+  function normalizeAiDraft(raw) {
+    var out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    AI_DRAFT_KEYS.forEach(function (k) {
+      if (!(k in raw)) return;
+      var v = raw[k];
+      out[k] = AI_DRAFT_TEXT[k] ? (v === null || v === undefined ? null : String(v)) : numOrNull(v);
+    });
+    return out;
   }
 
   function normalizeStock(raw) {
@@ -260,6 +282,17 @@
       s.currentPrice = newest ? newest.price : null;
     });
 
+    // 試算草稿：丟掉找不到對應股票的孤兒（比照上面孤兒紀錄的處理）。
+    // v1 檔的股票會拿到全新的 id，草稿自然一筆都對不上，結果就是空的——這是對的。
+    var alive = {};
+    out.stocks.forEach(function (s) { alive[s.id] = true; });
+    var rawDraft = (incoming && incoming.aiDraft) || {};
+    Object.keys(rawDraft).forEach(function (sid) {
+      if (!alive[sid]) return;
+      var d = normalizeAiDraft(rawDraft[sid]);
+      if (Object.keys(d).length) out.aiDraft[sid] = d;
+    });
+
     out.lastExportAt = incoming && typeof incoming.lastExportAt === 'string' ? incoming.lastExportAt : null;
     return out;
   }
@@ -348,6 +381,7 @@
   function removeStock(id) {
     state.stocks = state.stocks.filter(function (s) { return s.id !== id; });
     state.records = state.records.filter(function (r) { return r.stockId !== id; });
+    delete state.aiDraft[id];   // 不刪就會留下一筆永遠清不掉的孤兒草稿
     persist();
   }
 
@@ -460,6 +494,38 @@
     return Object.keys(seen).sort();
   }
 
+  // ---- AI insight 試算沙盒 ----
+
+  function aiDraftOf(stockId) { return state.aiDraft[stockId] || null; }
+
+  function setAiDraftField(stockId, key, value) {
+    if (AI_DRAFT_KEYS.indexOf(key) === -1) return null;
+    if (!findStock(stockId)) return null;
+    if (!state.aiDraft[stockId]) state.aiDraft[stockId] = {};
+    state.aiDraft[stockId][key] = value;
+    persist();
+    return state.aiDraft[stockId];
+  }
+
+  function clearAiDraft(stockId) {
+    delete state.aiDraft[stockId];
+    persist();
+  }
+
+  function clearAllAiDrafts() {
+    state.aiDraft = {};
+    persist();
+  }
+
+  function hasAiDraft(stockId) {
+    var d = state.aiDraft[stockId];
+    return !!d && Object.keys(d).length > 0;
+  }
+
+  function countAiDrafts() {
+    return Object.keys(state.aiDraft).filter(hasAiDraft).length;
+  }
+
   // ---- 匯出 / 匯入 ----
 
   function exportJson() {
@@ -526,6 +592,7 @@
     state.stocks.forEach(function (s) { byKey[stockKey(s)] = s; });
     var haveRecord = {};
     state.records.forEach(function (r) { haveRecord[r.id] = true; });
+    var idMap = {};   // 檔案裡的 stock id → 本機實際存進去的 id
 
     p.data.stocks.forEach(function (s) {
       var key = stockKey(s);
@@ -556,6 +623,22 @@
           copy.stockId = target.id;
           state.records.push(copy);
         });
+      idMap[s.id] = target.id;
+    });
+
+    // 草稿是用 stock id 當 key 的，而匯入會把紀錄改指向本機既有的那一檔，
+    // 所以草稿的 key 也要跟著重映射，否則整包會變成對不到任何股票的孤兒。
+    // 本機已經有的覆寫不蓋掉——那是你現在正在試算的東西。
+    Object.keys(p.data.aiDraft || {}).forEach(function (sid) {
+      var tid = idMap[sid];
+      if (!tid) return;
+      var incomingDraft = p.data.aiDraft[sid];
+      if (!state.aiDraft[tid]) state.aiDraft[tid] = {};
+      var cur = state.aiDraft[tid];
+      Object.keys(incomingDraft).forEach(function (k) {
+        if (!(k in cur)) cur[k] = incomingDraft[k];
+      });
+      if (!Object.keys(cur).length) delete state.aiDraft[tid];
     });
 
     if (!validateSettings(p.data.settings)) state.settings = p.data.settings;
@@ -605,6 +688,12 @@
     toggleStar: toggleStar,
     setStarNote: setStarNote,
     stockHasStar: stockHasStar,
+    aiDraftOf: aiDraftOf,
+    setAiDraftField: setAiDraftField,
+    clearAiDraft: clearAiDraft,
+    clearAllAiDrafts: clearAllAiDrafts,
+    hasAiDraft: hasAiDraft,
+    countAiDrafts: countAiDrafts,
     localDate: localDate,
     exportJson: exportJson,
     previewImport: previewImport,

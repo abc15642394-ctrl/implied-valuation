@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="12">
+<meta name="app-build" content="13">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -280,9 +280,11 @@
 <div id="viewAi" hidden>
   <div class="ai-bar">
     <button type="button" id="aiCopy" class="pill">複製給 AI</button>
-    <span class="lg hint-inline">複製的文字除了畫面上這幾欄，還會附上折現率、永續成長率，
-      以及每一檔的「我估 1-5 年／6-10 年」——少了這些，AI 看到合理價也無從判斷它是怎麼來的。</span>
+    <button type="button" id="aiResetAll" class="pill ghost" disabled>全部還原</button>
     <span id="aiCopyMsg" class="nudge" hidden></span>
+    <span class="lg hint-inline"><strong>這一頁是試算區</strong>：所有數字都能直接改，改了只存在這一頁，
+      不會動到追蹤清單與隱含總表。沒改過的格子仍跟著追蹤清單走，改過的會標起來。
+      點一列可以展開成長率與折現率。</span>
   </div>
 
   <p id="aiEmpty" class="empty" hidden></p>
@@ -297,6 +299,7 @@
           <th data-ai-sort="currentPrice" class="num c-fact">現價</th>
           <th data-ai-sort="eps" class="num c-fact">EPS</th>
           <th data-ai-sort="pe" class="num c-fact">本益比</th>
+          <th class="num c-mine">合理區間</th>
           <th data-ai-sort="fairValue" class="num c-mine">我估的合理價</th>
           <th data-ai-sort="implied" class="num c-market">市場隱含</th>
           <th data-ai-sort="gap" class="num c-signal">落差</th>
@@ -319,6 +322,8 @@
   <strong>現價</strong>是這一檔「今天的價」，存在股票上、隨時可改，市場隱含與上漲空間都從它算；
   <strong>當時股價</strong>是你跑那一筆估值時抄的價，屬於那一筆，只拿來對照，改現價不會動到它。<br>
   <strong>本益比</strong>＝現價 ÷ 你填的 EPS。EPS 若填的是你自己估的未來值，那它就是預估本益比，不是歷史本益比。<br>
+  <strong>AI insight 是試算頁</strong>：在那裡改的任何數字（含合理區間與備註）只存在那一頁，
+  不會動到追蹤清單與隱含總表；沒改過的欄位仍跟著追蹤清單即時變動。<br>
   主表顯示每檔「最新一筆」；點一列即可展開該檔的所有紀錄與走勢。折現率與永續成長率所有股票共用。
 </p>
 
