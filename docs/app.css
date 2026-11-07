@@ -453,10 +453,10 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
     border-radius: 0;
   }
 
-  table, tbody { display: block; width: 100%; }
-  thead { display: none; }
+  #stockTable, #stockTable tbody { display: block; width: 100%; }
+  #stockTable thead { display: none; }
 
-  tbody tr {
+  #stockTable tbody tr {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 2px 10px;
@@ -467,7 +467,7 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
     margin-bottom: 10px;
   }
 
-  tbody td {
+  #stockTable tbody td {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
@@ -478,7 +478,7 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
     font-size: .85rem;
   }
 
-  tbody td::before {
+  #stockTable tbody td::before {
     content: attr(data-label);
     color: var(--muted);
     font-size: .74rem;
@@ -486,24 +486,24 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
   }
 
   /* 第一行：代號（左）與落差（右），兩個大字 */
-  tbody td[data-col="ticker"] {
+  #stockTable tbody td[data-col="ticker"] {
     order: 1;
     font-size: 1.2rem;
     font-weight: 700;
     letter-spacing: .02em;
   }
 
-  tbody td[data-col="gap"] {
+  #stockTable tbody td[data-col="gap"] {
     order: 2;
     font-size: 1.2rem;
     justify-content: flex-end;
   }
 
-  tbody td[data-col="ticker"]::before,
-  tbody td[data-col="gap"]::before { display: none; }
+  #stockTable tbody td[data-col="ticker"]::before,
+  #stockTable tbody td[data-col="gap"]::before { display: none; }
 
   /* 第二行：名稱整列 */
-  tbody td[data-col="name"] {
+  #stockTable tbody td[data-col="name"] {
     order: 3;
     grid-column: 1 / -1;
     color: var(--muted);
@@ -512,62 +512,62 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
     padding-top: 0;
   }
 
-  tbody td[data-col="name"]::before { display: none; }
+  #stockTable tbody td[data-col="name"]::before { display: none; }
 
   /* 常駐四欄 */
-  tbody td[data-col="price"] { order: 4; }
-  tbody td[data-col="implied"] { order: 5; }
-  tbody td[data-col="myCagr1_5"] { order: 6; }
-  tbody td[data-col="fairValue"] { order: 7; }
+  #stockTable tbody td[data-col="price"] { order: 4; }
+  #stockTable tbody td[data-col="implied"] { order: 5; }
+  #stockTable tbody td[data-col="myCagr1_5"] { order: 6; }
+  #stockTable tbody td[data-col="fairValue"] { order: 7; }
 
   /* 其餘收起，點卡片展開 */
-  tbody td[data-col="market"],
-  tbody td[data-col="eps"],
-  tbody td[data-col="cagr6_10"],
-  tbody td[data-col="upside"],
-  tbody td[data-col="tvShare"],
-  tbody td[data-col="tags"],
-  tbody td[data-col="status"],
-  tbody td[data-col="updatedAt"],
-  tbody td[data-col="note"],
-  tbody td[data-col="actions"] {
+  #stockTable tbody td[data-col="market"],
+  #stockTable tbody td[data-col="eps"],
+  #stockTable tbody td[data-col="cagr6_10"],
+  #stockTable tbody td[data-col="upside"],
+  #stockTable tbody td[data-col="tvShare"],
+  #stockTable tbody td[data-col="tags"],
+  #stockTable tbody td[data-col="status"],
+  #stockTable tbody td[data-col="updatedAt"],
+  #stockTable tbody td[data-col="note"],
+  #stockTable tbody td[data-col="actions"] {
     display: none;
     grid-column: 1 / -1;
   }
 
-  tbody tr.expanded td[data-col="market"],
-  tbody tr.expanded td[data-col="eps"],
-  tbody tr.expanded td[data-col="cagr6_10"],
-  tbody tr.expanded td[data-col="upside"],
-  tbody tr.expanded td[data-col="tvShare"],
-  tbody tr.expanded td[data-col="tags"],
-  tbody tr.expanded td[data-col="status"],
-  tbody tr.expanded td[data-col="updatedAt"],
-  tbody tr.expanded td[data-col="note"],
-  tbody tr.expanded td[data-col="actions"] {
+  #stockTable tbody tr.expanded td[data-col="market"],
+  #stockTable tbody tr.expanded td[data-col="eps"],
+  #stockTable tbody tr.expanded td[data-col="cagr6_10"],
+  #stockTable tbody tr.expanded td[data-col="upside"],
+  #stockTable tbody tr.expanded td[data-col="tvShare"],
+  #stockTable tbody tr.expanded td[data-col="tags"],
+  #stockTable tbody tr.expanded td[data-col="status"],
+  #stockTable tbody tr.expanded td[data-col="updatedAt"],
+  #stockTable tbody tr.expanded td[data-col="note"],
+  #stockTable tbody tr.expanded td[data-col="actions"] {
     display: flex;
   }
 
-  tbody tr.expanded td[data-col="market"],
-  tbody tr.expanded td[data-col="eps"],
-  tbody tr.expanded td[data-col="cagr6_10"],
-  tbody tr.expanded td[data-col="upside"],
-  tbody tr.expanded td[data-col="tvShare"] {
+  #stockTable tbody tr.expanded td[data-col="market"],
+  #stockTable tbody tr.expanded td[data-col="eps"],
+  #stockTable tbody tr.expanded td[data-col="cagr6_10"],
+  #stockTable tbody tr.expanded td[data-col="upside"],
+  #stockTable tbody tr.expanded td[data-col="tvShare"] {
     grid-column: auto;
   }
 
-  tbody tr.expanded td[data-col="market"] { order: 8; }
-  tbody tr.expanded td[data-col="eps"] { order: 9; }
-  tbody tr.expanded td[data-col="cagr6_10"] { order: 10; }
-  tbody tr.expanded td[data-col="upside"] { order: 11; }
-  tbody tr.expanded td[data-col="tvShare"] { order: 12; }
-  tbody tr.expanded td[data-col="tags"] { order: 13; }
-  tbody tr.expanded td[data-col="status"] { order: 14; }
-  tbody tr.expanded td[data-col="updatedAt"] { order: 15; }
-  tbody tr.expanded td[data-col="note"] { order: 16; }
-  tbody tr.expanded td[data-col="actions"] { order: 17; justify-content: flex-end; }
+  #stockTable tbody tr.expanded td[data-col="market"] { order: 8; }
+  #stockTable tbody tr.expanded td[data-col="eps"] { order: 9; }
+  #stockTable tbody tr.expanded td[data-col="cagr6_10"] { order: 10; }
+  #stockTable tbody tr.expanded td[data-col="upside"] { order: 11; }
+  #stockTable tbody tr.expanded td[data-col="tvShare"] { order: 12; }
+  #stockTable tbody tr.expanded td[data-col="tags"] { order: 13; }
+  #stockTable tbody tr.expanded td[data-col="status"] { order: 14; }
+  #stockTable tbody tr.expanded td[data-col="updatedAt"] { order: 15; }
+  #stockTable tbody tr.expanded td[data-col="note"] { order: 16; }
+  #stockTable tbody tr.expanded td[data-col="actions"] { order: 17; justify-content: flex-end; }
 
-  tbody td[data-col="note"] { color: var(--muted); font-size: .8rem; }
+  #stockTable tbody td[data-col="note"] { color: var(--muted); font-size: .8rem; }
 
   td input {
     width: 90px;
@@ -582,7 +582,7 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
 }
 
 /* 備註只在手機展開時出現；桌機靠名稱欄的 title 提示。 */
-td[data-col="note"] { display: none; }
+#stockTable td[data-col="note"] { display: none; }
 
 /* ---- 估值計算器 ---- */
 
@@ -1208,4 +1208,210 @@ input[readonly], select:disabled {
 @media (min-width: 769px) and (max-width: 1023px) {
   #stockTable th[data-sort="status"],
   #stockTable td[data-col="status"] { display: none; }
+}
+
+/* ---- 分頁切換 ---- */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 2px solid var(--line);
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-radius: 8px 8px 0 0;
+  margin-bottom: -2px;
+  padding: 9px 18px;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab:hover { background: var(--bg); filter: none; color: var(--text); }
+
+.tab.on {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+  background: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tab.on { color: #9db8ea; border-bottom-color: #9db8ea; }
+}
+
+/* ---- 隱含成長率五級分帶 ---- */
+
+:root {
+  --b1-bg: #c7ead6;  --b1-fg: #0b4a2d;   /* < 0%   市場假設萎縮 */
+  --b2-bg: #ddf2c9;  --b2-fg: #27500d;   /* 0–10%  要求不高 */
+  --b3-bg: #fdf0c4;  --b3-fg: #5c4708;   /* 10–20% 中性 */
+  --b4-bg: #fcdcc0;  --b4-fg: #6b3607;   /* 20–30% 偏高 */
+  --b5-bg: #fbcdc9;  --b5-fg: #76201a;   /* > 30%  要求極高 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --b1-bg: #123a27;  --b1-fg: #8fe3b6;
+    --b2-bg: #1e3d16;  --b2-fg: #bfe88f;
+    --b3-bg: #3d3310;  --b3-fg: #f0d98a;
+    --b4-bg: #43260d;  --b4-fg: #f5bb86;
+    --b5-bg: #44191a;  --b5-fg: #f8a8a1;
+  }
+}
+
+#summaryTable td.band { font-weight: 700; font-variant-numeric: tabular-nums; }
+#summaryTable td.band.b1 { background: var(--b1-bg); color: var(--b1-fg); }
+#summaryTable td.band.b2 { background: var(--b2-bg); color: var(--b2-fg); }
+#summaryTable td.band.b3 { background: var(--b3-bg); color: var(--b3-fg); }
+#summaryTable td.band.b4 { background: var(--b4-bg); color: var(--b4-fg); }
+#summaryTable td.band.b5 { background: var(--b5-bg); color: var(--b5-fg); }
+
+.band-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  font-size: .78rem;
+}
+
+.band-legend .lg { color: var(--muted); margin-right: 4px; }
+.band-legend .hint-inline { margin-left: auto; }
+
+.band-legend .band {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+.band-legend .b1 { background: var(--b1-bg); color: var(--b1-fg); }
+.band-legend .b2 { background: var(--b2-bg); color: var(--b2-fg); }
+.band-legend .b3 { background: var(--b3-bg); color: var(--b3-fg); }
+.band-legend .b4 { background: var(--b4-bg); color: var(--b4-fg); }
+.band-legend .b5 { background: var(--b5-bg); color: var(--b5-fg); }
+.band-legend[hidden] { display: none; }
+
+/* ---- 總表 ---- */
+
+#summaryTable, #fairOnlyTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+  white-space: nowrap;
+}
+
+#summaryTable th, #summaryTable td,
+#fairOnlyTable th, #fairOnlyTable td {
+  padding: 8px 7px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+#summaryTable thead th, #fairOnlyTable thead th {
+  color: var(--muted);
+  font-size: .74rem;
+  font-weight: 600;
+}
+
+#summaryTable thead th[data-sum-sort] { cursor: pointer; user-select: none; }
+#summaryTable thead th.sorted::after { content: ' ▾'; color: var(--brand-2); }
+#summaryTable thead th.sorted.asc::after { content: ' ▴'; }
+
+#summaryTable th.num, #summaryTable td.num,
+#fairOnlyTable th.num, #fairOnlyTable td.num { text-align: right; }
+
+#summaryTable tbody tr:last-child td,
+#fairOnlyTable tbody tr:last-child td { border-bottom: none; }
+
+#summaryTable tbody tr:hover td:not(.band),
+#fairOnlyTable tbody tr:hover td { background: var(--bg); }
+
+.sum-actions { white-space: nowrap; }
+.sum-actions .pill { margin-right: 4px; }
+
+#summaryTable .na, #fairOnlyTable .na { color: var(--muted); font-weight: 500; font-size: .78rem; }
+
+.fair-only { margin-top: 18px; border-left: 4px solid var(--c-mine); }
+.fair-only .sec-title { color: var(--text); font-size: .95rem; }
+
+/* ---- 手機：總表自己的卡片規則（不沿用主表的） ---- */
+
+@media (max-width: 768px) {
+  .tabs { margin-bottom: 10px; }
+  .tab { flex: 1 1 0; padding: 10px 8px; text-align: center; }
+  .band-legend .hint-inline { margin-left: 0; flex: 1 1 100%; }
+
+  #summaryWrap, #fairOnlyWrap { overflow: visible; background: none; border: none; }
+
+  #summaryTable, #summaryTable tbody,
+  #fairOnlyTable, #fairOnlyTable tbody { display: block; width: 100%; }
+  #summaryTable thead, #fairOnlyTable thead { display: none; }
+
+  #summaryTable tbody tr, #fairOnlyTable tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 10px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+
+  #summaryTable tbody td, #fairOnlyTable tbody td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 3px 0;
+    border: none;
+    white-space: normal;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  #summaryTable tbody td::before, #fairOnlyTable tbody td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: .72rem;
+    flex: 0 0 auto;
+  }
+
+  /* 代號與名稱佔滿整列當標題；隱含那格放大成主角 */
+  #summaryTable tbody td[data-col="ticker"], #fairOnlyTable tbody td[data-col="ticker"],
+  #summaryTable tbody td[data-col="name"], #fairOnlyTable tbody td[data-col="name"],
+  #summaryTable tbody td[data-col="actions"], #fairOnlyTable tbody td[data-col="actions"] {
+    grid-column: 1 / -1;
+  }
+
+  #summaryTable tbody td[data-col="ticker"], #fairOnlyTable tbody td[data-col="ticker"] {
+    font-size: 1.1rem; font-weight: 700;
+  }
+  #summaryTable tbody td[data-col="ticker"]::before,
+  #fairOnlyTable tbody td[data-col="ticker"]::before,
+  #summaryTable tbody td[data-col="name"]::before,
+  #fairOnlyTable tbody td[data-col="name"]::before { display: none; }
+
+  #summaryTable tbody td[data-col="name"], #fairOnlyTable tbody td[data-col="name"] {
+    color: var(--muted); font-size: .8rem; margin-bottom: 4px; padding-top: 0;
+  }
+
+  #summaryTable tbody td[data-col="implied"] {
+    grid-column: 1 / -1;
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin: 4px 0;
+    font-size: 1.05rem;
+  }
+
+  #summaryTable tbody td[data-col="actions"],
+  #fairOnlyTable tbody td[data-col="actions"] { justify-content: flex-end; margin-top: 4px; }
+  #summaryTable tbody td[data-col="actions"]::before,
+  #fairOnlyTable tbody td[data-col="actions"]::before { display: none; }
+
+  .fair-only { border-left-width: 3px; }
 }

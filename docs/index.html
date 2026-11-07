@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="8">
+<meta name="app-build" content="9">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -128,6 +128,11 @@
   </div>
 </section>
 
+<div class="tabs" role="tablist" aria-label="檢視">
+  <button type="button" class="tab on" role="tab" id="tabList" aria-selected="true" data-tab="list">追蹤清單</button>
+  <button type="button" class="tab" role="tab" id="tabSummary" aria-selected="false" data-tab="summary">隱含總表</button>
+</div>
+
 <section class="filters">
   <input type="search" id="filterText" placeholder="搜尋代號或名稱">
   <select id="filterMarket"><option value="">全部市場</option><option value="TW">台股</option><option value="US">美股</option></select>
@@ -141,10 +146,12 @@
   <button type="button" id="clearFilters" class="pill ghost" hidden>清除篩選</button>
 </div>
 
+<div id="viewList">
+
 <p id="emptyState" class="empty" hidden>還沒有追蹤任何股票。上面算完後按「加入追蹤」。</p>
 <p id="noMatch" class="empty" hidden>沒有符合目前篩選條件的股票。</p>
 
-<div class="table-wrap" hidden>
+<div class="table-wrap" id="mainTableWrap" hidden>
   <table id="stockTable">
     <thead>
       <tr>
@@ -204,6 +211,66 @@
   <p class="hint">依日期分組：同一天的幾筆是平行試算，彼此不互相比較。
     每個數字下方的小字，是跟<strong>前一個日期</strong>的代表筆（該日最新一筆）相比的變化。</p>
 </section>
+
+</div><!-- /#viewList -->
+
+<!-- 隱含總表 -->
+<div id="viewSummary" hidden>
+  <div class="band-legend" id="bandLegend">
+    <span class="lg">市場隱含成長率</span>
+    <span class="band b1">&lt; 0%</span>
+    <span class="band b2">0–10%</span>
+    <span class="band b3">10–20%</span>
+    <span class="band b4">20–30%</span>
+    <span class="band b5">&gt; 30%</span>
+    <span class="lg hint-inline">越綠＝市場要求越低，越紅＝市場要求越高</span>
+  </div>
+
+  <p id="summaryEmpty" class="empty" hidden></p>
+
+  <div class="table-wrap" id="summaryWrap" hidden>
+    <table id="summaryTable">
+      <thead>
+        <tr>
+          <th data-sum-sort="ticker">代號</th>
+          <th data-sum-sort="name">名稱</th>
+          <th data-sum-sort="date">估值日期</th>
+          <th data-sum-sort="price" class="num c-fact">當時股價</th>
+          <th data-sum-sort="eps" class="num c-fact">EPS</th>
+          <th data-sum-sort="myCagr1_5" class="num c-mine">我估 1-5 年</th>
+          <th data-sum-sort="implied" class="num c-market">市場隱含</th>
+          <th data-sum-sort="gap" class="num c-signal">落差</th>
+          <th data-sum-sort="fairValue" class="num c-mine">合理價</th>
+          <th data-sum-sort="upside" class="num c-mine">上漲空間</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="summaryBody"></tbody>
+    </table>
+  </div>
+
+  <section id="fairOnlySection" class="panel fair-only" hidden>
+    <h2 class="sec-title">只算得出合理價（未填股價，無法反推市場隱含）</h2>
+    <div class="table-wrap" id="fairOnlyWrap">
+      <table id="fairOnlyTable">
+        <thead>
+          <tr>
+            <th>代號</th>
+            <th>名稱</th>
+            <th>估值日期</th>
+            <th class="num c-fact">EPS</th>
+            <th class="num c-mine">我估 1-5 年</th>
+            <th class="num c-mine">6-10 年</th>
+            <th class="num c-mine">合理價</th>
+            <th class="num c-warn">永續佔比</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="fairOnlyBody"></tbody>
+      </table>
+    </div>
+  </section>
+</div><!-- /#viewSummary -->
 
 <p class="footnote">
   <span class="key c-fact">事實</span>股價與 EPS 是你抄進來的。

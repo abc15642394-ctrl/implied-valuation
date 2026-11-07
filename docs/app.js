@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 8;            // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 9;            // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -17,6 +17,8 @@
   var filters = defaultFilters();
   var helperTarget = null;  // { kind: 'calc' } 或 { kind: 'record', id: ... }
   var selectedStockId = null;
+  var activeTab = 'list';
+  var sumSort = { key: 'implied', dir: 'asc' };   // 預設最便宜的排最上面
   var editingRecordId = null;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -128,6 +130,20 @@
     return '<button type="button" class="star' + (on ? ' on' : '') + '" data-star="' + kind
       + '" data-star-id="' + esc(item.id) + '" title="' + esc(t) + '" aria-pressed="' + on + '">'
       + (on ? '★' : '☆') + '</button>';
+  }
+
+  // 市場隱含的五級分帶，界線 0 / 10 / 20 / 30。
+  // 低＝市場要求不高（相對便宜）→ 綠；高＝市場要求極高 → 紅。
+  function impliedBand(v) {
+    if (v === null || !isFinite(v)) return '';
+    // 用「顯示出來的那個數字」分帶，不是原始值。二分搜尋會回傳 9.999389…，
+    // 畫面四捨五入成 10.00% 卻被分到 0–10% 那一帶，顏色跟數字對不起來。
+    var shown = Math.round(v * 100) / 100;
+    if (shown < 0) return 'b1';
+    if (shown < 10) return 'b2';
+    if (shown < 20) return 'b3';
+    if (shown < 30) return 'b4';
+    return 'b5';
   }
 
   function gapState(gap) {
@@ -417,7 +433,7 @@
 
     $('emptyState').hidden = total !== 0;
     $('noMatch').hidden = !(total > 0 && rows.length === 0);
-    document.querySelector('.table-wrap').hidden = rows.length === 0;
+    $('mainTableWrap').hidden = rows.length === 0;
 
     var shownRecords = rows.reduce(function (n, r) {
       return n + (filters.starred
@@ -426,7 +442,8 @@
     }, 0);
     updateCountLine(total, rows.length, shownRecords);
 
-    document.querySelectorAll('thead th[data-sort]').forEach(function (th) {
+    // 一定要限定 #stockTable：不限定的話會連別張表的標題一起標上排序狀態。
+    document.querySelectorAll('#stockTable thead th[data-sort]').forEach(function (th) {
       th.classList.toggle('sorted', th.dataset.sort === sort.key);
       th.classList.toggle('asc', th.dataset.sort === sort.key && sort.dir === 'asc');
     });
@@ -435,6 +452,7 @@
     renderExportNudge();
     renderStorageWarning();
     renderDetail();
+    renderSummary();
   }
 
   function filtersActive() {
@@ -793,6 +811,171 @@
     inp.addEventListener('click', function (e) { e.stopPropagation(); });
   }
 
+  // ---- 隱含總表 ----
+
+  function summaryRows() {
+    var st = settings();
+    return Store.getState().stocks.filter(function (s) {
+      if (filters.market && s.market !== filters.market) return false;
+      if (filters.status && s.status !== filters.status) return false;
+      var text = filters.text.trim().toLowerCase();
+      if (text && (s.ticker + ' ' + s.name).toLowerCase().indexOf(text) === -1) return false;
+      if (filters.tags.length && !filters.tags.every(function (t) { return s.tags.indexOf(t) !== -1; })) return false;
+      if (filters.starred && !Store.stockHasStar(s.id)) return false;
+      return true;
+    }).map(function (s) {
+      var rec = Store.latestRecord(s.id);
+      return { stock: s, rec: rec, calc: rec ? computeRecord(rec, st) : null };
+    }).filter(function (r) { return !!r.rec; });
+  }
+
+  function sumValue(row, key) {
+    var s = row.stock, r = row.rec, c = row.calc;
+    switch (key) {
+      case 'ticker': return s.ticker;
+      case 'name': return s.name;
+      case 'date': return r.date;
+      case 'price': return r.price;
+      case 'eps': return r.eps;
+      case 'myCagr1_5': return r.myCagr1_5;
+      case 'implied': return c.implied;
+      case 'gap': return c.gap;
+      case 'fairValue': return c.fairValue;
+      case 'upside': return c.upside;
+      default: return null;
+    }
+  }
+
+  function sortSummary(rows) {
+    var dir = sumSort.dir === 'asc' ? 1 : -1;
+    rows.sort(function (a, b) {
+      var va = sumValue(a, sumSort.key), vb = sumValue(b, sumSort.key);
+      var na = va === null || va === undefined || (typeof va === 'number' && !isFinite(va));
+      var nb = vb === null || vb === undefined || (typeof vb === 'number' && !isFinite(vb));
+      if (na && nb) return 0;
+      if (na) return 1;
+      if (nb) return -1;
+      if (typeof va === 'string') return va.localeCompare(vb, 'zh-Hant') * dir;
+      return (va - vb) * dir;
+    });
+  }
+
+  // 總表是唯讀顯示：要改就按「編輯」載回計算器。
+  // 這裡不渲染 <input>——就地編輯的 change 處理器只綁在 #stockBody，
+  // 在這裡放輸入框只會做出一個改了不會存的欄位。
+  function sumCell(col, inner, cls) {
+    return '<td class="' + (cls || '') + '" data-col="' + col + '" data-label="' + (SUM_LABELS[col] || '') + '">'
+      + inner + '</td>';
+  }
+
+  var SUM_LABELS = {
+    ticker: '代號', name: '名稱', date: '估值日期', price: '當時股價', eps: 'EPS',
+    myCagr1_5: '我估 1-5 年', implied: '市場隱含', gap: '落差', fairValue: '合理價',
+    upside: '上漲空間', cagr6_10: '6-10 年', tvShare: '永續佔比', actions: ''
+  };
+
+  function sumActions(rec) {
+    return '<button type="button" class="pill" data-edit-rec="' + esc(rec.id) + '" title="載回上方計算器修改">編輯</button>'
+      + '<button type="button" class="del" data-del-rec="' + esc(rec.id) + '" title="刪除這一筆紀錄">✕</button>';
+  }
+
+  function sumIdCell(s) {
+    return sumCell('ticker', starHtml('stock', s) + '<strong>' + esc(s.ticker || '（無代號）') + '</strong>'
+      + ' <span class="mkt">' + (s.market === 'US' ? 'US' : 'TW') + '</span>');
+  }
+
+  function summaryRowHtml(row) {
+    var s = row.stock, r = row.rec, c = row.calc;
+    var band = impliedBand(c.implied);
+    var html = '<tr data-sum-stock="' + esc(s.id) + '">';
+    html += sumIdCell(s);
+    html += sumCell('name', '<span class="ellip" title="' + esc(s.name) + '">' + esc(s.name) + '</span>');
+    html += sumCell('date', '<span title="' + esc(r.date) + '">' + esc(shortDate(r.date)) + '</span>');
+    html += sumCell('price', fmtNum(r.price), 'num c-fact');
+    html += sumCell('eps', fmtNum(r.eps), 'num c-fact');
+    html += sumCell('myCagr1_5', r.myCagr1_5 === null ? '<span class="na">未估</span>' : fmtPct(r.myCagr1_5), 'num c-mine');
+    html += sumCell('implied', '<span class="band-val">' + fmtPct(c.implied) + '</span>', 'num band ' + band);
+    html += sumCell('gap', gapHtml(c), 'num');
+    html += sumCell('fairValue', fmtNum(c.fairValue), 'num c-mine');
+    html += sumCell('upside', c.upside === null ? '—' : fmtSigned(c.upside, 1, '%'), 'num c-mine');
+    html += sumCell('actions', sumActions(r), 'sum-actions');
+    return html + '</tr>';
+  }
+
+  function fairOnlyRowHtml(row) {
+    var s = row.stock, r = row.rec, c = row.calc;
+    var html = '<tr data-sum-stock="' + esc(s.id) + '">';
+    html += sumIdCell(s);
+    html += sumCell('name', '<span class="ellip" title="' + esc(s.name) + '">' + esc(s.name) + '</span>');
+    html += sumCell('date', '<span title="' + esc(r.date) + '">' + esc(shortDate(r.date)) + '</span>');
+    html += sumCell('eps', fmtNum(r.eps), 'num c-fact');
+    html += sumCell('myCagr1_5', r.myCagr1_5 === null ? '<span class="na">未估</span>' : fmtPct(r.myCagr1_5), 'num c-mine');
+    html += sumCell('cagr6_10', fmtPct(r.cagr6_10), 'num c-mine');
+    html += sumCell('fairValue', fmtNum(c.fairValue), 'num c-mine');
+    html += sumCell('tvShare', tvHtml(c), 'num c-warn');
+    html += sumCell('actions', sumActions(r), 'sum-actions');
+    return html + '</tr>';
+  }
+
+  function renderSummary() {
+    var all = summaryRows();
+    var withImplied = all.filter(function (r) { return r.calc.impliedStatus === 'ok'; });
+    var fairOnly = all.filter(function (r) { return r.calc.impliedStatus !== 'ok'; });
+
+    sortSummary(withImplied);
+
+    $('summaryBody').innerHTML = withImplied.map(function (row) {
+      try { return summaryRowHtml(row); }
+      catch (err) {
+        console.error('總表這一列畫不出來', row.stock, err);
+        return '<tr class="row-error"><td colspan="11">這一列畫不出來：' + esc(err.message) + '</td></tr>';
+      }
+    }).join('');
+    $('summaryWrap').hidden = withImplied.length === 0;
+
+    $('fairOnlyBody').innerHTML = fairOnly.map(function (row) {
+      try { return fairOnlyRowHtml(row); }
+      catch (err) {
+        console.error('只算合理價這一列畫不出來', row.stock, err);
+        return '<tr class="row-error"><td colspan="9">這一列畫不出來：' + esc(err.message) + '</td></tr>';
+      }
+    }).join('');
+    $('fairOnlySection').hidden = fairOnly.length === 0;
+
+    // 總表有自己的空狀態，不共用主表的 emptyState / noMatch
+    var msg = '';
+    if (Store.getState().stocks.length === 0) msg = '還沒有追蹤任何股票。上面算完後按「加入追蹤」。';
+    else if (all.length === 0) msg = '沒有符合目前篩選條件的股票。';
+    // 第三種：有股票、也通過篩選，但一檔都反推不出隱含。上半部整張表會消失，
+    // 不講一句話的話畫面就是「圖例＋一片空白＋下半部」，看起來像壞掉。
+    else if (withImplied.length === 0) msg = '這些股票都沒有填股價，反推不出市場隱含——全部列在下方「只算得出合理價」。';
+    $('summaryEmpty').textContent = msg;
+    $('summaryEmpty').hidden = !msg;
+
+    // 上半部沒東西時，色階圖例沒有對應的表可看，一併收起來。
+    $('bandLegend').hidden = withImplied.length === 0;
+
+    document.querySelectorAll('#summaryTable thead th[data-sum-sort]').forEach(function (th) {
+      th.classList.toggle('sorted', th.dataset.sumSort === sumSort.key);
+      th.classList.toggle('asc', th.dataset.sumSort === sumSort.key && sumSort.dir === 'asc');
+    });
+  }
+
+  function setTab(name) {
+    activeTab = name === 'summary' ? 'summary' : 'list';
+    $('viewList').hidden = activeTab !== 'list';
+    $('viewSummary').hidden = activeTab !== 'summary';
+    [['list', 'tabList'], ['summary', 'tabSummary']].forEach(function (pair) {
+      var btn = $(pair[1]);
+      var on = pair[0] === activeTab;
+      btn.classList.toggle('on', on);
+      btn.setAttribute('aria-selected', String(on));
+      btn.tabIndex = on ? 0 : -1;
+    });
+    try { localStorage.setItem('iv-tab', activeTab); } catch (e) {}
+    render();
+  }
+
   function selectStock(id) {
     if (editingRecordId !== null) {
       var ed = Store.findRecord(editingRecordId);
@@ -966,7 +1149,7 @@
     var b = tr.getBoundingClientRect();
     var topbar = document.querySelector('.topbar').getBoundingClientRect().bottom;
     if (b.top < topbar || b.bottom > window.innerHeight) {
-      document.querySelector('.table-wrap').scrollIntoView({ block: 'center' });
+      $('mainTableWrap').scrollIntoView({ block: 'center' });
     }
   }
 
@@ -1052,6 +1235,63 @@
     $('addBtn').addEventListener('click', addToTracking);
     $('newTicker').addEventListener('input', function () { showAddMsg(''); });
 
+    // 所有列層級的互動都委派在 .shell 上——星號、編輯、刪除紀錄、刪除整檔、
+    // 點列選取。先前這些散在 #stockBody 與 #recordBody 兩個容器，而且星號的
+    // 邏輯是兩份重複的；新增一張表就會得到一堆「按了沒反應」的按鈕。
+    document.querySelector('.shell').addEventListener('click', function (e) {
+      var star = e.target.closest('[data-star]');
+      if (star) {
+        e.stopPropagation();
+        var item = Store.toggleStar(star.dataset.star, star.dataset.starId);
+        render();
+        // 剛標起來的紀錄，就地問一句原因（股票層的原因在分頁表標頭編輯）
+        if (item && item.starred && star.dataset.star === 'record'
+            && $('recordBody').querySelector('tr[data-rec-row="' + star.dataset.starId + '"]')) {
+          openStarNoteInput(star.dataset.starId);
+        }
+        return;
+      }
+
+      var ed = e.target.closest('[data-edit-rec]');
+      if (ed) { e.stopPropagation(); enterEdit(ed.dataset.editRec); return; }
+
+      var delRec = e.target.closest('[data-del-rec]');
+      if (delRec) {
+        e.stopPropagation();
+        var rec = Store.findRecord(delRec.dataset.delRec);
+        if (!rec) return;
+        var left = Store.recordsOf(rec.stockId).length;
+        var msg = left <= 1
+          ? '這是這檔股票最後一筆紀錄，刪掉之後整檔也會從清單消失。要刪嗎？'
+          : '刪除 ' + rec.date + ' 這一筆紀錄？';
+        if (!confirm(msg)) return;
+        if (editingRecordId === rec.id) exitEdit();
+        var r = Store.removeRecord(rec.id);
+        if (r.removedStock) selectedStockId = null;
+        render();
+        return;
+      }
+
+      var delStock = e.target.closest('[data-del-stock]');
+      if (delStock) {
+        e.stopPropagation();
+        var st2 = Store.findStock(delStock.dataset.delStock);
+        if (!st2) return;
+        var n = Store.countOf(st2.id);
+        if (!confirm('刪除 ' + (st2.ticker || '這一檔') + '？連同它的 ' + n + ' 筆紀錄都會一起刪掉。')) return;
+        exitEdit();
+        Store.removeStock(st2.id);
+        if (selectedStockId === st2.id) selectedStockId = null;
+        render();
+        return;
+      }
+
+      // 點主表的列＝選取該檔（總表的列不帶 data-stock，所以不會誤觸）
+      if (e.target.closest('input, button')) return;
+      var tr = e.target.closest('#stockBody tr[data-stock]');
+      if (tr) selectStock(tr.dataset.stock);
+    });
+
     // 主表：就地編輯最新一筆
     $('stockBody').addEventListener('change', function (e) {
       var inp = e.target;
@@ -1063,65 +1303,7 @@
       renderStorageWarning();
     });
 
-    $('stockBody').addEventListener('click', function (e) {
-      var del = e.target.closest('[data-del-stock]');
-      if (del) {
-        e.stopPropagation();
-        var s = Store.findStock(del.dataset.delStock);
-        if (!s) return;
-        var n = Store.countOf(s.id);
-        if (confirm('刪除 ' + (s.ticker || '這一檔') + '？連同它的 ' + n + ' 筆紀錄都會一起刪掉。')) {
-          exitEdit();
-          Store.removeStock(s.id);
-          if (selectedStockId === s.id) selectedStockId = null;
-          render();
-        }
-        return;
-      }
-      var st = e.target.closest('[data-star]');
-      if (st) {
-        e.stopPropagation();
-        Store.toggleStar(st.dataset.star, st.dataset.starId);
-        render();
-        return;
-      }
-      if (e.target.closest('input, button')) return;
-      var tr = e.target.closest('tr[data-stock]');
-      if (tr) selectStock(tr.dataset.stock);
-    });
-
     $('cancelEdit').addEventListener('click', function () { exitEdit(); recalcCalculator(); });
-
-    // 分頁表：編輯與逐筆刪除
-    $('recordBody').addEventListener('click', function (e) {
-      var stBtn = e.target.closest('[data-star]');
-      if (stBtn) {
-        var item = Store.toggleStar(stBtn.dataset.star, stBtn.dataset.starId);
-        render();
-        // 剛標記起來 → 就地開一個小輸入框問原因，不想寫直接跳開即可
-        if (item && item.starred && stBtn.dataset.star === 'record') {
-          openStarNoteInput(stBtn.dataset.starId);
-        }
-        return;
-      }
-
-      var ed = e.target.closest('[data-edit-rec]');
-      if (ed) { enterEdit(ed.dataset.editRec); return; }
-
-      var del = e.target.closest('[data-del-rec]');
-      if (!del) return;
-      var rec = Store.findRecord(del.dataset.delRec);
-      if (!rec) return;
-      var left = Store.recordsOf(rec.stockId).length;
-      var msg = left <= 1
-        ? '這是這檔股票最後一筆紀錄，刪掉之後整檔也會從清單消失。要刪嗎？'
-        : '刪除 ' + rec.date + ' 這一筆紀錄？';
-      if (!confirm(msg)) return;
-      if (editingRecordId === rec.id) exitEdit();
-      var r = Store.removeRecord(rec.id);
-      if (r.removedStock) selectedStockId = null;
-      render();
-    });
 
     $('detailClose').addEventListener('click', function () {
       exitEdit(); recalcCalculator(); selectedStockId = null; render();
@@ -1158,6 +1340,27 @@
       $('filterStatus').value = '';
       $('filterStar').classList.remove('on');
       render();
+    });
+
+    var tabBtns = [$('tabList'), $('tabSummary')];
+    tabBtns.forEach(function (btn, i) {
+      btn.addEventListener('click', function () { setTab(btn.dataset.tab); });
+      btn.addEventListener('keydown', function (e) {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        var next = tabBtns[(i + (e.key === 'ArrowRight' ? 1 : tabBtns.length - 1)) % tabBtns.length];
+        setTab(next.dataset.tab);
+        next.focus();
+      });
+    });
+
+    document.querySelectorAll('#summaryTable thead th[data-sum-sort]').forEach(function (th) {
+      th.addEventListener('click', function () {
+        var key = th.dataset.sumSort;
+        if (sumSort.key === key) { sumSort.dir = sumSort.dir === 'asc' ? 'desc' : 'asc'; }
+        else { sumSort.key = key; sumSort.dir = 'asc'; }
+        renderSummary();
+      });
     });
 
     $('filterStar').addEventListener('click', function () {
@@ -1387,7 +1590,9 @@
     $('newDate').value = Store.today();
     bind();
     recalcCalculator();
-    render();
+    var saved = 'list';
+    try { saved = localStorage.getItem('iv-tab') || 'list'; } catch (e) {}
+    setTab(saved);                 // setTab 內部會呼叫 render()
     registerServiceWorker();
   }
 
