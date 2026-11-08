@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="14">
-<meta name="theme-color" content="#1e3c72">
+<meta name="app-build" content="15">
+<meta name="theme-color" content="#18202e">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -166,7 +166,7 @@
         <th data-sort="implied" class="num c-market">市場隱含</th>
         <th data-sort="gap" class="num c-signal">落差</th>
         <th data-sort="fairValue" class="num c-mine">合理價</th>
-        <th data-sort="upside" class="num c-mine">上漲空間</th>
+        <th data-sort="upside" class="num c-signal">上漲空間</th>
         <th data-sort="count" class="num">筆數</th>
         <th data-sort="status">狀態</th>
         <th data-sort="date">更新</th>
@@ -243,7 +243,7 @@
           <th data-sum-sort="implied" class="num c-market">市場隱含</th>
           <th data-sum-sort="gap" class="num c-signal">落差</th>
           <th data-sum-sort="fairValue" class="num c-mine">合理價</th>
-          <th data-sum-sort="upside" class="num c-mine">上漲空間</th>
+          <th data-sum-sort="upside" class="num c-signal">上漲空間</th>
           <th></th>
         </tr>
       </thead>
@@ -303,7 +303,7 @@
           <th data-ai-sort="fairValue" class="num c-mine">我估的合理價</th>
           <th data-ai-sort="implied" class="num c-market">市場隱含</th>
           <th data-ai-sort="gap" class="num c-signal">落差</th>
-          <th data-ai-sort="upside" class="num c-mine">上漲空間</th>
+          <th data-ai-sort="upside" class="num c-signal">上漲空間</th>
           <th data-ai-sort="note">備註</th>
           <th></th>
         </tr>
@@ -316,8 +316,9 @@
 <p class="footnote">
   <span class="key c-fact">事實</span>股價與 EPS 是你抄進來的。
   <span class="key c-market">市場</span>隱含成長率是從現價反推的。
-  <span class="key c-mine">我估</span>合理價與上漲空間來自你填的成長率。
-  <span class="key c-signal">訊號</span>落差＝市場隱含 − 我估，負值代表市場的要求比你低。
+  <span class="key c-mine">我估</span>合理價來自你填的成長率。
+  <span class="key c-signal">訊號</span>落差與上漲空間用同一套訊號色：綠＝對你有利、紅＝不利、灰＝沒有訊號。
+  落差＝市場隱含 − 我估，負值代表市場的要求比你低。
   <span class="key c-warn">警示</span>永續佔比越高，估值越是靠第 10 年後的終值假設撐著。<br>
   <strong>現價</strong>是這一檔「今天的價」，存在股票上、隨時可改，市場隱含與上漲空間都從它算；
   <strong>當時股價</strong>是你跑那一筆估值時抄的價，屬於那一筆，只拿來對照，改現價不會動到它。<br>

@@ -1,53 +1,35 @@
 :root {
-  --brand: #1e3c72;
-  --brand-2: #2a5298;
-  --bg: #eef1f6;
-  --surface: #ffffff;
-  --text: #16202e;
-  --muted: #64748b;
-  --line: #d9e0ea;
-  --good: #0f7b4f;
-  --good-bg: #e3f5ec;
-  --bad: #b3261e;
-  --bad-bg: #fdeceb;
-  --warn: #8a5a00;
-  --warn-bg: #fdf3dd;
+  /* 這個 App 固定深色，不跟隨系統設定。
+     color-scheme 一定要宣告：少了它，系統偏好若是淺色，<select> 的下拉面板、
+     <input type="date"> 的日期選擇器與捲軸會留在白色——那些是瀏覽器畫的，
+     CSS 變數管不到。 */
+  color-scheme: dark;
+
+  --brand: #3b6bbf;
+  --brand-2: #4d82d8;
+  --brand-text: #9db8ea;   /* 深底上的標題用色；先前在四個地方各寫死一次 */
+  --bg: #0f1420;
+  --surface: #18202e;
+  --text: #e8edf5;
+  --muted: #94a3b8;
+  --line: #2b3648;
+  --good: #5ddba0;
+  --good-bg: #16301f;
+  --bad: #ff8d84;
+  --bad-bg: #351a19;
+  --warn: #e8c070;
+  --warn-bg: #332714;
+  --star: #f0c43a;         /* 星號標記；先前散在六個地方，只有一處有深色版 */
   --radius: 12px;
 
   /* 依「這個數字從哪來」分組的色彩系統 */
-  --c-fact: #1e3c72;     /* 事實：你抄進來的股價與 EPS */
-  --c-market: #0e7490;   /* 市場推出來的：隱含成長率 */
-  --c-mine: #6d28d9;     /* 你的假設與其產物：成長率、合理價、上漲空間 */
-  --c-signal: #0f7b4f;   /* 訊號：落差（正負再分綠紅） */
-  --c-global: #64748b;   /* 全局設定：折現率、永續成長率 */
-  --c-warn: #8a5a00;     /* 警示：永續價值佔比 */
+  --c-fact: #9fb3cd;     /* 事實：你抄進來的股價與 EPS。墨色，不假裝有顏色 */
+  --c-market: #45c4d8;   /* 市場推出來的：隱含成長率 */
+  --c-mine: #b78af5;     /* 你的假設與其產物：我估的成長率、合理價 */
+  --c-signal: #5ddba0;   /* 訊號：落差（正負再分綠紅） */
+  --c-global: #94a3b8;   /* 全局設定：折現率、永續成長率 */
+  --c-warn: #e8c070;     /* 警示：永續價值佔比 */
   --shell-max: 1100px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1420;
-    --surface: #18202e;
-    --text: #e8edf5;
-    --muted: #94a3b8;
-    --line: #2b3648;
-    --good: #5ddba0;
-    --good-bg: #16301f;
-    --bad: #ff8d84;
-    --bad-bg: #351a19;
-    --warn: #e8c070;
-    --warn-bg: #332714;
-
-    /* 深色底上要提亮，否則按鈕與色條都糊成一片 */
-    --brand: #3b6bbf;
-    --brand-2: #4d82d8;
-    --c-fact: #7aa6f0;
-    --c-market: #45c4d8;
-    --c-mine: #b78af5;
-    --c-signal: #5ddba0;
-    --c-global: #94a3b8;
-    --c-warn: #e8c070;
-  }
 }
 
 * { box-sizing: border-box; }
@@ -87,12 +69,8 @@ body {
 .topbar h1 {
   margin: 0;
   font-size: 1.15rem;
-  color: var(--brand);
+  color: var(--brand-text);
   letter-spacing: .02em;
-}
-
-@media (prefers-color-scheme: dark) {
-  .topbar h1 { color: #9db8ea; }
 }
 
 .topbar-actions {
@@ -179,7 +157,8 @@ input, select {
 input:focus, select:focus {
   outline: none;
   border-color: var(--brand-2);
-  box-shadow: 0 0 0 3px rgba(42, 82, 152, .18);
+  /* 深底上要夠亮才看得見焦點在哪一格；原本是淺色版品牌藍 18%，等於沒有 */
+  box-shadow: 0 0 0 3px rgba(77, 130, 216, .35);
 }
 
 /* ---- 面板 ---- */
@@ -322,6 +301,20 @@ td input {
 td input:hover { border-color: var(--line); }
 td input:focus { background: var(--surface); border-color: var(--brand-2); }
 
+/* 落差與上漲空間是要掃視的兩欄，給它們膠囊底色才真的跳得出來；
+   中性是灰底，有訊號才綠/紅。沿用分帶色塊同一套手法。 */
+td[data-col="gap"] .signal-cell:not(.na),
+td[data-col="upside"] .signal-cell:not(.na) {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+}
+td[data-col="gap"] .signal-cell.good,
+td[data-col="upside"] .signal-cell.good { background: var(--good-bg); }
+td[data-col="gap"] .signal-cell.bad,
+td[data-col="upside"] .signal-cell.bad { background: var(--bad-bg); }
+
 .signal-cell { font-weight: 700; font-variant-numeric: tabular-nums; }
 .signal-cell.good { color: var(--good); }
 .signal-cell.bad { color: var(--bad); }
@@ -420,11 +413,7 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
 .modal-box h2 {
   margin: 0 0 14px;
   font-size: 1rem;
-  color: var(--brand);
-}
-
-@media (prefers-color-scheme: dark) {
-  .modal-box h2 { color: #9db8ea; }
+  color: var(--brand-text);
 }
 
 .modal-box label { margin-bottom: 10px; }
@@ -457,9 +446,11 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
 .modal-actions.column { flex-direction: column; }
 .modal-actions.column button { width: 100%; }
 
-/* ---- 手機：同一份 DOM 轉成卡片 ---- */
+/* ---- 窄畫面：同一份 DOM 轉成卡片 ----
+   門檻跟總表一致是 830px：主表 13 欄在 800px 一樣塞不下，而且兩張表一個是
+   卡片、一個是表格看起來很突兀。 */
 
-@media (max-width: 768px) {
+@media (max-width: 830px) {
   body { padding: 0 12px 40px; font-size: 16px; }
 
   .filters input[type="search"] { max-width: none; flex: 1 1 100%; }
@@ -611,12 +602,8 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
   text-align: center;
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--brand);
+  color: var(--brand-text);
   letter-spacing: .02em;
-}
-
-@media (prefers-color-scheme: dark) {
-  .calc-title { color: #9db8ea; }
 }
 
 .calc-grid {
@@ -694,9 +681,12 @@ button.primary { width: 100%; }
 
 .track-box > button { margin-top: 0; }
 
-/* ---- 手機 ---- */
+/* ---- 窄畫面（≤830px）----
+   全站的窄版門檻統一是 830，不是常見的 768：這幾張表欄位太多，800px 硬撐成
+   表格會橫向捲動。只改其中幾個區塊的話，會變成同一個寬度下有的是卡片、
+   有的是表格。 */
 
-@media (max-width: 768px) {
+@media (max-width: 830px) {
   .calc-grid { grid-template-columns: 1fr; gap: 10px; }
   .calc-title { font-size: 1.1rem; }
 
@@ -756,9 +746,13 @@ thead th.c-mine   { color: var(--c-mine); }
 thead th.c-signal { color: var(--c-signal); }
 thead th.c-warn   { color: var(--c-warn); }
 
+/* td.c-fact 先前只寫在 COL_TONE 裡、CSS 沒有對應規則，等於一個沒兌現的承諾。
+   補上之後，你抄進來的原始數字（當時股價、EPS）是墨色，跟算出來的數字分得開。
+   主表那兩格是 <input>，color 不繼承，不受影響。 */
+td.c-fact   { color: var(--c-fact); }
 td.c-market { color: var(--c-market); font-weight: 600; }
 td.c-mine   { color: var(--c-mine); }
-td.c-market .na, td.c-mine .na { color: var(--muted); font-weight: 500; }
+td.c-fact .na, td.c-market .na, td.c-mine .na { color: var(--muted); font-weight: 500; }
 
 /* 落差欄是訊號，表頭要比其他欄明顯 */
 thead th.c-signal { font-weight: 700; }
@@ -845,7 +839,7 @@ tr.row-error td {
 
 /* ---- 手機 ---- */
 
-@media (max-width: 768px) {
+@media (max-width: 830px) {
   /* 手機上 topbar 換行後高達 114px，是螢幕的 14%。
      黏著它只會讓捲到上緣的卡片永遠被蓋住一塊，不值得——改成一般捲動。 */
   .topbar { position: static; }
@@ -1009,7 +1003,7 @@ button.pill.danger { background: var(--bad); color: #fff; border: none; }
 
 /* ---- 手機 ---- */
 
-@media (max-width: 768px) {
+@media (max-width: 830px) {
   .ellip { max-width: none; }
 
   .detail-head { align-items: flex-start; }
@@ -1120,7 +1114,7 @@ input[readonly], select:disabled {
 
 /* ---- 手機 ---- */
 
-@media (max-width: 768px) {
+@media (max-width: 830px) {
   .trend-svg { max-height: none; }
 
   #recordTable tr.group-row { display: block; grid-template-columns: none; padding: 0; border: none; background: none; margin: 14px 0 6px; }
@@ -1149,12 +1143,8 @@ input[readonly], select:disabled {
 /* AI 試算頁的星號是唯讀顯示：它寫的是真實股票的標記，不該在那一頁被改。 */
 .star.static { cursor: default; }
 .star.static:hover { color: var(--line); }
-.star.static.on, .star.static.on:hover { color: #e8a800; }
-.star.on { color: #e8a800; }
-
-@media (prefers-color-scheme: dark) {
-  .star.on { color: #f0c43a; }
-}
+.star.static.on, .star.static.on:hover { color: var(--star); }
+.star.on { color: var(--star); }
 
 /* 被標記的紀錄整列淡底 */
 #recordTable tbody tr.starred td { background: var(--warn-bg); }
@@ -1174,7 +1164,7 @@ input[readonly], select:disabled {
 
 /* 篩選列的「只看標記」開關 */
 .tag-chip.star-chip { font-weight: 600; }
-.tag-chip.star-chip.on { background: #e8a800; border-color: #e8a800; color: #2a1c00; }
+.tag-chip.star-chip.on { background: var(--star); border-color: var(--star); color: #2a1c00; }
 
 /* 分頁表標頭的星號與原因 */
 #detailStar .star { font-size: 1.25rem; padding-right: 2px; }
@@ -1192,22 +1182,22 @@ input[readonly], select:disabled {
 /* 趨勢圖上的標記點 */
 .trend-svg .dot-star-ring {
   fill: none;
-  stroke: #e8a800;
+  stroke: var(--star);
   stroke-width: 1.8;
 }
 
 .trend-svg .pt-label.starred { font-weight: 800; }
-.trend-legend .star-k { color: #e8a800; }
+.trend-legend .star-k { color: var(--star); }
 .trend-legend .star-k::before { display: none; }
 
 .empty-rec { color: var(--muted); text-align: center; padding: 20px 0; }
 
 /* ---- 手機 ---- */
 
-@media (max-width: 768px) {
+@media (max-width: 830px) {
   .star { font-size: 1.15rem; padding: 0 8px 0 0; }
   .star-note { max-width: none; }
-  #recordTable tbody tr.starred { border-color: #e8a800; }
+  #recordTable tbody tr.starred { border-color: var(--star); }
   .star-note-input { flex: 1 1 100%; max-width: none; }
   .detail-head { flex-wrap: wrap; }
 }
@@ -1219,10 +1209,10 @@ input[readonly], select:disabled {
   max-width: 180px;
   font-size: .75rem;
   padding: 3px 7px;
-  border-color: #e8a800;
+  border-color: var(--star);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 830px) {
   .star-note-edit { max-width: none; }
 }
 
@@ -1231,9 +1221,13 @@ input[readonly], select:disabled {
    隱含總表 12 欄在 1024px 的餘裕剛好是 0，再窄就會溢出 83px；
    「當時股價」只是對照用，分頁表裡每一筆都看得到，讓它先退。
    「現價」是這張表的輸入欄，任何寬度都不能藏。 */
-@media (min-width: 769px) and (max-width: 1023px) {
+@media (min-width: 831px) and (max-width: 1023px) {
   #stockTable th[data-sort="status"],
   #stockTable td[data-col="status"] { display: none; }
+
+  /* 上漲空間改成訊號膠囊之後這一段又差 13px。名稱截短（完整名稱在 title、
+     代號也還在）是這裡損失最小的一刀。 */
+  #stockTable .ellip { max-width: 56px; }
 
   /* 藏掉「狀態」之後主表還是溢出 46px（12 欄 × 左右各 7px 的內距）。
      左右各收 3px 就回收 72px，比再藏掉一整欄溫和。 */
@@ -1271,33 +1265,24 @@ input[readonly], select:disabled {
 .tab:hover { background: var(--bg); filter: none; color: var(--text); }
 
 .tab.on {
-  color: var(--brand);
-  border-bottom-color: var(--brand);
+  color: var(--brand-text);
+  border-bottom-color: var(--brand-text);
   background: none;
-}
-
-@media (prefers-color-scheme: dark) {
-  .tab.on { color: #9db8ea; border-bottom-color: #9db8ea; }
 }
 
 /* ---- 隱含成長率五級分帶 ---- */
 
+/* 舊的深色分帶底色幾乎跟頁面一樣暗——色塊對頁面底色的對比只有 1.09–1.35，
+   所以看起來根本沒有色塊；而且 b1 深綠跟 b2 綠只差 ΔE 7.4，分不出來。
+   這組把色相從「綠→紅」拉開成「藍綠→綠→琥珀→橙→紅」，實測：
+   字/底對比 4.73–5.78（全部 ≥ 4.5）、任兩帶最小 ΔE 15.7、
+   底/頁面對比 2.05–3.17。改這裡要把這三個數字重新量過。 */
 :root {
-  --b1-bg: #c7ead6;  --b1-fg: #0b4a2d;   /* < 0%   市場假設萎縮 */
-  --b2-bg: #ddf2c9;  --b2-fg: #27500d;   /* 0–10%  要求不高 */
-  --b3-bg: #fdf0c4;  --b3-fg: #5c4708;   /* 10–20% 中性 */
-  --b4-bg: #fcdcc0;  --b4-fg: #6b3607;   /* 20–30% 偏高 */
-  --b5-bg: #fbcdc9;  --b5-fg: #76201a;   /* > 30%  要求極高 */
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --b1-bg: #123a27;  --b1-fg: #8fe3b6;
-    --b2-bg: #1e3d16;  --b2-fg: #bfe88f;
-    --b3-bg: #3d3310;  --b3-fg: #f0d98a;
-    --b4-bg: #43260d;  --b4-fg: #f5bb86;
-    --b5-bg: #44191a;  --b5-fg: #f8a8a1;
-  }
+  --b1-bg: #0a6660;  --b1-fg: #c5f6f0;   /* < 0%   市場假設萎縮 */
+  --b2-bg: #2f7d22;  --b2-fg: #e8fcd4;   /* 0–10%  要求不高 */
+  --b3-bg: #7d5f08;  --b3-fg: #ffeeb4;   /* 10–20% 中性 */
+  --b4-bg: #96480a;  --b4-fg: #ffdfc2;   /* 20–30% 偏高 */
+  --b5-bg: #9a2320;  --b5-fg: #ffd0ca;   /* ≥ 30%  要求極高 */
 }
 
 /* 分帶配色也掛在 .sum-table 上：隱含總表與 AI insight 看的是同一個數字，
@@ -1453,7 +1438,7 @@ input[readonly], select:disabled {
 
 /* AI 表 13 欄，比另外兩張都寬，1024px 就已經差 67px。「估值日期」在追蹤清單
    與隱含總表都看得到，而且它的輸入框在展開區裡，是這張表最適合讓位的一欄。 */
-@media (min-width: 769px) and (max-width: 1100px) {
+@media (min-width: 831px) and (max-width: 1100px) {
   #aiTable th[data-ai-sort="date"],
   #aiTable td[data-col="date"] { display: none; }
 }
@@ -1464,7 +1449,7 @@ input[readonly], select:disabled {
    起點刻意設在 1024 而不是 769：這是 #aiTable（id）規則，跟 ≤1023 那一段的
    .sum-table（class）重疊的話，會把那邊整組收斂蓋掉（實測 769px 會爆到 884）。 */
 @media (min-width: 1024px) {
-  #aiTable th, #aiTable td { padding-left: 5px; padding-right: 5px; }
+  #aiTable th, #aiTable td { padding-left: 4px; padding-right: 4px; }
 }
 
 /* ---- AI insight：試算沙盒 ---- */
@@ -1488,7 +1473,7 @@ input[readonly], select:disabled {
 
 /* 名稱欄的上限。全站是 140px，這張表 13 欄禁不起那麼長的名稱——
    1280px 下算完只剩 9px 餘裕，一個長名稱就會把表推出去。 */
-@media (min-width: 769px) {
+@media (min-width: 831px) {
   #aiTable .ellip { max-width: 100px; }
 }
 #aiTable .caret { color: var(--muted); font-size: .7rem; margin-left: 6px; }
@@ -1540,8 +1525,13 @@ input[readonly], select:disabled {
 
 /* 窄桌機的總表：藏掉「當時股價」之後還差 22px。內距與字級各收一點點。
    這一塊必須放在上面那些總表基礎樣式「之後」——同樣特異度下先寫的會被蓋掉，
-   寫在前面那個 769–1023px 區塊裡是沒有作用的。 */
-@media (min-width: 769px) and (max-width: 1023px) {
+   寫在前面那個區塊裡是沒有作用的。
+   起點是 831 不是 769：830 以下總表已經是卡片，再套桌機的收斂沒有意義。 */
+@media (min-width: 831px) and (max-width: 1023px) {
+  /* 加了訊號膠囊之後這一段差 23px。名稱是唯一可以截斷又不損失資訊的欄位
+     （完整名稱在 title，代號也還在），收到 44px 回收 29px。 */
+  #aiTable .ellip { max-width: 44px; }
+
   .sum-table { font-size: .76rem; }
   .sum-table th, .sum-table td { padding-left: 4px; padding-right: 4px; }
   .sum-table td input { width: 54px; }
@@ -1557,9 +1547,12 @@ input[readonly], select:disabled {
   .sum-actions .pill { margin-right: 2px; }
 }
 
-/* ---- 手機：總表自己的卡片規則（不沿用主表的） ---- */
+/* ---- 窄畫面：總表自己的卡片規則（不沿用主表的） ----
+   門檻刻意比別處的 768px 高：AI 表有 13 欄，在 800px 硬塞成表格會橫向捲動，
+   與其藏掉使用者指定的欄位，不如提早切成卡片。下面幾個桌機專用的區塊因此
+   都要從 831px 起跳，否則會對「已經是卡片」的元素套表格規則。 */
 
-@media (max-width: 768px) {
+@media (max-width: 830px) {
   .tabs { margin-bottom: 10px; }
   .tab { flex: 1 1 0; padding: 10px 8px; text-align: center; }
   .band-legend .hint-inline { margin-left: 0; flex: 1 1 100%; }

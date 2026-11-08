@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 14;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 15;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -418,9 +418,10 @@
     count: '筆數', status: '狀態', date: '更新', actions: ''
   };
 
+  // upside 拿掉 c-mine：它改用訊號色（綠/紅/灰），再掛「我估紫」會兩套打架。
   var COL_TONE = {
     price: 'c-fact', eps: 'c-fact', myCagr1_5: 'c-mine',
-    fairValue: 'c-mine', upside: 'c-mine', implied: 'c-market', gap: 'c-signal', tvShare: 'c-warn'
+    fairValue: 'c-mine', implied: 'c-market', gap: 'c-signal', tvShare: 'c-warn'
   };
 
   function cell(col, inner, extraClass) {
@@ -456,6 +457,17 @@
     return c.impliedStatus === 'ok'
       ? fmtPct(c.implied)
       : '<span class="signal-cell na">' + esc(statusMessage(c.impliedStatus, eps, price, priceLabel)) + '</span>';
+  }
+
+  // 上漲空間跟落差一樣是方向性數字：正＝合理價高於現價，負＝現價已經超過。
+  // 用同一套訊號色，一眼看得出賺賠。先前它跟合理價同一個紫，正負完全分不出來。
+  // 門檻用 0，不用落差那組 ±5pp——那是成長率的「差不多」區間，套在價格上沒有意義。
+  function upsideHtml(c, naText) {
+    if (c.upside === null) {
+      return '<span class="signal-cell na">' + esc(naText || '—') + '</span>';
+    }
+    var state = c.upside > 0 ? 'good' : (c.upside < 0 ? 'bad' : '');
+    return '<span class="signal-cell ' + state + '">' + fmtSigned(c.upside, 1, '%') + '</span>';
   }
 
   function gapHtml(c) {
@@ -499,7 +511,7 @@
     html += cell('implied', impliedHtml(c, r.eps, s.currentPrice, '現價'), 'num');
     html += cell('gap', gapHtml(c), 'num');
     html += cell('fairValue', fmtNum(c.fairValue), 'num');
-    html += cell('upside', c.upside === null ? '—' : fmtSigned(c.upside, 1, '%'), 'num');
+    html += cell('upside', upsideHtml(c), 'num');
     html += cell('count', '<span class="count-pill">' + row.count + '</span>', 'num');
     html += cell('status', '<span class="badge ' + s.status + '">' + (s.status === 'held' ? '持有' : '觀察中') + '</span>');
     html += cell('date', dateHtml(r.date));
@@ -517,7 +529,7 @@
       implied: impliedHtml(c, rec.eps, stock.currentPrice, '現價'),
       gap: gapHtml(c),
       fairValue: fmtNum(c.fairValue),
-      upside: c.upside === null ? '—' : fmtSigned(c.upside, 1, '%'),
+      upside: upsideHtml(c),
       date: dateHtml(rec.date)
     };
     Object.keys(map).forEach(function (col) {
@@ -1032,7 +1044,7 @@
       'num ' + (band ? 'band ' + band : 'c-market'));
     html += sumCell('gap', gapHtml(c), 'num');
     html += sumCell('fairValue', fmtNum(c.fairValue), 'num c-mine');
-    html += sumCell('upside', c.upside === null ? '—' : fmtSigned(c.upside, 1, '%'), 'num c-mine');
+    html += sumCell('upside', upsideHtml(c), 'num');
     html += sumCell('actions', sumActions(r), 'sum-actions');
     return html + '</tr>';
   }
@@ -1299,9 +1311,8 @@
       : naCell(statusMessage(c.impliedStatus, eff.eps, eff.currentPrice, '現價')),
       'num ' + (band ? 'band ' + band : 'c-market'));
     html += aiCell('gap', gapHtml(c), 'num');
-    html += aiCell('upside', c.upside === null
-      ? naCell(upsideReason(eff.currentPrice, eff.eps, eff.myCagr1_5))
-      : fmtSigned(c.upside, 1, '%'), 'num c-mine');
+    html += aiCell('upside',
+      upsideHtml(c, upsideReason(eff.currentPrice, eff.eps, eff.myCagr1_5)), 'num');
     html += aiCell('note', aiInput(eff, 'note', { placeholder: '只存在這一頁' }));
     html += aiCell('actions', aiResetBtn(s), 'sum-actions');
     html += '</tr>';
@@ -2224,14 +2235,14 @@
       b.setAttribute('style',
         'position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;gap:12px;' +
         'align-items:center;flex-wrap:wrap;padding:14px 16px;font:14px/1.5 -apple-system,sans-serif;' +
-        'background:#fdeceb;color:#b3261e;border-bottom:2px solid #b3261e;');
+        'background:#351a19;color:#ff8d84;border-bottom:2px solid #ff8d84;');
       b.innerHTML = '<strong>網頁沒能正常啟動。</strong><span id="fatalDetail"></span>';
       var btn = document.createElement('button');
       btn.id = 'fatalReset';
       btn.type = 'button';
       btn.textContent = '清除快取並重新載入';
       btn.setAttribute('style',
-        'background:#b3261e;color:#fff;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit;');
+        'background:#ff8d84;color:#1a0f0e;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit;');
       b.appendChild(btn);
       document.body.insertBefore(b, document.body.firstChild);
     }
