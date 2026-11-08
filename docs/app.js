@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 15;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 16;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -1211,13 +1211,25 @@
         : '可以直接改，只影響這一頁，不會動到追蹤清單與隱含總表。';
     }
     var v = eff[field];
-    return '<input type="' + type + '"'
-      + (type === 'number' ? ' step="any" inputmode="decimal"' : '')
-      + (type === 'text' ? ' size="1"' : '')
-      + (opts.placeholder ? ' placeholder="' + esc(opts.placeholder) + '"' : '')
-      + ' class="ai-in' + (on ? ' edited' : '') + (opts.cls ? ' ' + opts.cls : '') + '"'
+    var common = ' class="ai-in' + (on ? ' edited' : '') + (opts.cls ? ' ' + opts.cls : '') + '"'
       + ' title="' + esc(hint) + '"'
       + ' data-ai-stock="' + esc(eff.stock.id) + '" data-ai-field="' + field + '"'
+      + (opts.placeholder ? ' placeholder="' + esc(opts.placeholder) + '"' : '');
+
+    // 備註用 textarea：<input> 永遠不換行，再寬都會有更長的備註把文字推出框外，
+    // 所以「不要一直左右移」真正的解是讓它換行，不是加寬。
+    //
+    // 值的前面一定要多墊一個 '\n'。HTML 解析會丟掉緊接在 <textarea> 起始標籤後
+    // 的第一個換行字元，所以「以換行開頭的備註」會掉掉那個換行——實測確認過。
+    // 多墊的這個換行就是被丟掉的那一個，值本身因此一字不差。
+    if (type === 'text') {
+      return '<textarea rows="2"' + common + '>\n'
+        + esc(v === null || v === undefined ? '' : v) + '</textarea>';
+    }
+
+    return '<input type="' + type + '"'
+      + (type === 'number' ? ' step="any" inputmode="decimal"' : '')
+      + common
       + ' value="' + (type === 'number' ? inputValue(v) : esc(v === null || v === undefined ? '' : v)) + '">';
   }
 
@@ -1407,7 +1419,12 @@
   // ---- 複製給 AI ----
 
   // Markdown 表格的欄位分隔是 |，備註裡出現 | 會把整列切歪。
-  function mdCell(text) { return String(text === null || text === undefined ? '' : text).replace(/\|/g, '\\|'); }
+  // 備註改成 textarea 之後可以含換行，換行會把 Markdown 表格切成兩列，一併折成空白。
+  function mdCell(text) {
+    return String(text === null || text === undefined ? '' : text)
+      .replace(/\s*\r?\n\s*/g, ' ')
+      .replace(/\|/g, '\\|');
+  }
 
   var AI_COPY_HEAD = ['代號', '名稱', '估值日期', '現價', 'EPS', '本益比', '我的合理區間',
     '我估的合理價', '市場隱含', '落差', '上漲空間', '我估 1-5 年', '6-10 年',
@@ -1934,13 +1951,13 @@
       // AI 試算頁：點一列展開／收合試算區。要排在下面那句提早 return 之前，
       // 否則點在儲存格上也會被它攔掉。展開列不帶 data-sum-stock，所以
       // 點展開區裡的空白處不會把它自己收起來。
-      if (!e.target.closest('input, button, label, a')) {
+      if (!e.target.closest('input, textarea, button, label, a')) {
         var aiTr = e.target.closest('#aiBody tr[data-sum-stock]');
         if (aiTr) { toggleAiExpand(aiTr.dataset.sumStock); return; }
       }
 
       // 點主表的列＝選取該檔（總表的列不帶 data-stock，所以不會誤觸）
-      if (e.target.closest('input, button')) return;
+      if (e.target.closest('input, textarea, button')) return;
       var tr = e.target.closest('#stockBody tr[data-stock]');
       if (tr) selectStock(tr.dataset.stock);
     });

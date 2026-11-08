@@ -143,7 +143,7 @@ label {
   flex: 0 0 auto;
 }
 
-input, select {
+input, select, textarea {
   font: inherit;
   width: 100%;
   min-width: 0;
@@ -154,7 +154,7 @@ input, select {
   color: var(--text);
 }
 
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--brand-2);
   /* 深底上要夠亮才看得見焦點在哪一格；原本是淺色版品牌藍 18%，等於沒有 */
@@ -271,7 +271,7 @@ thead th.sorted.asc::after { content: ' ▴'; }
 tbody tr { scroll-margin-top: 90px; }
 tbody tr:last-child td { border-bottom: none; }
 
-td input {
+td input, td textarea {
   width: 64px;
   padding: 3px 4px;
   text-align: right;
@@ -298,8 +298,8 @@ td input {
   margin: 0;
 }
 
-td input:hover { border-color: var(--line); }
-td input:focus { background: var(--surface); border-color: var(--brand-2); }
+td input:hover, td textarea:hover { border-color: var(--line); }
+td input:focus, td textarea:focus { background: var(--surface); border-color: var(--brand-2); }
 
 /* 落差與上漲空間是要掃視的兩欄，給它們膠囊底色才真的跳得出來；
    中性是灰底，有訊號才綠/紅。沿用分帶色塊同一套手法。 */
@@ -578,7 +578,7 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
 
   #stockTable tbody td[data-col="note"] { color: var(--muted); font-size: .8rem; }
 
-  td input {
+  td input, td textarea {
     width: 90px;
     text-align: right;
     border-color: var(--line);
@@ -797,7 +797,7 @@ thead th.c-signal { font-weight: 700; }
 
 tbody tr.flash { animation: flash-row 1.6s ease-out; }
 
-td input.rejected {
+td input.rejected, td textarea.rejected {
   border-color: var(--bad) !important;
   background: var(--bad-bg);
 }
@@ -1415,7 +1415,8 @@ input[readonly], select:disabled {
   border-color: var(--brand-2);
   background: var(--surface);
 }
-.sum-table td input::placeholder {
+.sum-table td input::placeholder,
+.sum-table td textarea::placeholder {
   color: var(--muted);
   font-size: .78em;
 }
@@ -1455,7 +1456,8 @@ input[readonly], select:disabled {
 /* ---- AI insight：試算沙盒 ---- */
 
 /* 被你改過的格子要看得出來，否則分不清眼前的數字是真的還是試算的。 */
-.sum-table td input.ai-in.edited {
+.sum-table td input.ai-in.edited,
+.sum-table td textarea.ai-in.edited {
   border-color: var(--c-mine);
   background: var(--surface);
   font-weight: 700;
@@ -1518,7 +1520,31 @@ input[readonly], select:disabled {
 /* 備註是這三張表裡唯一的文字欄：讓它吃掉剩下的寬度，其餘欄維持 nowrap。
    min-width 只是下限，欄位本來就會隨剩餘空間長，所以收小不等於變窄。 */
 .sum-table td[data-col="note"] { min-width: 88px; }
-.sum-table td[data-col="note"] input { width: 100%; min-width: 0; text-align: left; }
+.sum-table td[data-col="note"] input,
+.sum-table td[data-col="note"] textarea { width: 100%; min-width: 0; text-align: left; }
+
+/* 備註是 textarea（<input> 永遠不換行，再寬都會被更長的備註推出框外）。
+   高度靠 field-sizing 由內容推算：renderAi() 每次存檔都整表重建，手動拖曳的
+   高度留不住，但由內容推算的高度重建後會自己長回來。不支援 field-sizing 的
+   瀏覽器就維持 rows="2" 的兩行。max-height 是必要的上限，否則一則很長的備註
+   會把那一列拉得很高。 */
+.sum-table td[data-col="note"] textarea.ai-in {
+  vertical-align: top;
+  line-height: 1.3;
+  resize: vertical;
+  field-sizing: content;
+  max-height: 4.6em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+/* 這張表本來就有餘裕，只是被平均分給 13 欄，所以哪一欄都沒變寬。百分比會把
+   剩餘空間導向真正需要的那一欄，而且會自我節制：沒餘裕時幾乎不動，所以不必
+   改任何 min-width。必須包在 min-width: 831px 裡——卡片版面的備註是整列寬，
+   套了 22% 會從 325px 縮到 88px。 */
+@media (min-width: 831px) {
+  .sum-table td[data-col="note"] { width: 22%; }
+}
 
 .fair-only { margin-top: 18px; border-left: 4px solid var(--c-mine); }
 .fair-only .sec-title { color: var(--text); font-size: .95rem; }
