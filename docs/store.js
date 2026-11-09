@@ -748,8 +748,8 @@
   function canPush() { var c = deviceConfig(); return !!(c.token && c.gistId); }
   function canPull() { return !!deviceConfig().gistId; }
 
-  function markPushed() {
-    state.lastPushAt = nowIso();
+  function markPushed(at) {
+    state.lastPushAt = at || nowIso();
     persist();
     return state.lastPushAt;
   }
@@ -776,8 +776,18 @@
     if (!c.token || !c.gistId) {
       return Promise.resolve({ ok: false, error: '還沒填 gist id 或 token' });
     }
+    // 時間戳必須寫進「送出去的那一份」。原本是推完才 markPushed()，但內容在那之前
+    // 就序列化好了，所以 gist 裡的 lastPushAt 永遠是 null——手機算不出資料多舊，
+    // 「防靜默過期」那道保護等於沒有。實機測出來的。
+    //
+    // state 本身不動：推失敗的話不能在本機謊報推過，否則下次就不會提醒該備份了。
+    var at = nowIso();
+    var payload = {};
+    Object.keys(state).forEach(function (k) { payload[k] = state[k]; });
+    payload.lastPushAt = at;
+
     var files = {};
-    files[GIST_FILE] = { content: JSON.stringify(state, null, 2) };
+    files[GIST_FILE] = { content: JSON.stringify(payload, null, 2) };
     return fetch('https://api.github.com/gists/' + encodeURIComponent(c.gistId), {
       method: 'PATCH',
       headers: {
@@ -794,7 +804,7 @@
         return { ok: false, error: '找不到這個 gist。gist id 可能打錯了' };
       }
       if (!res.ok) return { ok: false, error: 'GitHub 回應 ' + res.status };
-      markPushed();
+      markPushed(at);          // 本機記的跟推上去的是同一個時間
       return { ok: true, at: state.lastPushAt };
     }).catch(function (err) {
       return { ok: false, error: '連不上 GitHub：' + err.message };
