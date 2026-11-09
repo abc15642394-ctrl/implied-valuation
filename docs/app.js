@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 16;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 17;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -619,6 +619,30 @@
       el.textContent = '上次匯出：' + (days === 0 ? '今天' : days + ' 天前');
       el.classList.toggle('stale', days > EXPORT_NUDGE_DAYS);
     }
+  }
+
+  // iOS 的 Safari、加到主畫面的 app、LINE 內建瀏覽器各有一份互不相通的 localStorage，
+  // 而且這是 Apple 刻意的設計（WebKit Bug 181849）。同一個網址在三個地方打開會看到
+  // 三份不同的資料——不標出來的話，換一個地方開就會以為「資料不見了」。
+  function runtimeLabel() {
+    if (navigator.standalone === true) return '主畫面 app';   // iOS 專用，非標準
+    try {
+      if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) {
+        return '主畫面 app';
+      }
+    } catch (e) { /* 舊瀏覽器沒有 matchMedia，往下走一般分頁 */ }
+    if (/\bLine\//i.test(navigator.userAgent || '')) return 'LINE 瀏覽器';
+    return '瀏覽器分頁';
+  }
+
+  // 只在啟動時判一次：這三種環境不會在同一次瀏覽中互相切換。
+  function renderEnvTag() {
+    var el = $('envTag');
+    if (!el) return;
+    el.textContent = runtimeLabel();
+    el.title = '這份資料存在「' + el.textContent + '」裡。Safari、主畫面 app、'
+      + 'LINE 內建瀏覽器各存一份，彼此看不到對方——換個地方打開筆數不一樣是正常的，不是資料不見了。';
+    el.hidden = false;
   }
 
   function renderSettings() {
@@ -2319,6 +2343,7 @@
     Store.load();
     Store.requestPersistence();
     renderSettings();
+    renderEnvTag();
     $('calcG610').value = settings().defaultCagr6_10;   // 只在載入時種一次
     $('newDate').value = Store.today();
     bind();

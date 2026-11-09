@@ -771,6 +771,20 @@ thead th.c-signal { font-weight: 700; }
   color: var(--muted);
 }
 
+/* 常駐的環境標示，不是警告——所以用中性的邊框色，不用 warn。
+   筆數就在它右邊的 #countLine，這裡不重複寫。 */
+.env-tag {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: .78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.env-tag[hidden] { display: none; }
+
 /* ---- 啟動失敗橫幅與自救 ---- */
 
 .fatal {
