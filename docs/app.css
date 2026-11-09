@@ -177,6 +177,9 @@ input:focus, select:focus, textarea:focus {
   margin: 10px 0 0;
 }
 
+/* 同步視窗裡的錯誤訊息。失敗時要一眼看得出來，不能混在灰字裡。 */
+.hint.error-text { color: var(--bad); font-weight: 600; }
+
 .footnote { margin-top: 20px; }
 
 .error {
@@ -409,6 +412,34 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
 }
 
 .modal-box.narrow { max-width: 300px; }
+
+/* 備份擋版。**刻意不用 .modal 這個 class**：closeAllModals() 會掃所有 .modal，
+   而 Esc 與點背景都會呼叫它——破壞性提醒要是按個 Esc 就跳過，就擋不住任何人了。
+   這一層只能用它自己的三顆按鈕關掉。 */
+.blocker {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 16, 28, .82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 80;          /* 比 .modal 的 50 高：它要蓋在所有東西上面 */
+}
+
+.blocker[hidden] { display: none; }
+
+.blocker-box {
+  background: var(--surface);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  padding: 20px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.blocker-box h2 { margin: 0 0 10px; font-size: 1rem; color: var(--warn); }
+.blocker-box p { margin: 0 0 14px; font-size: .88rem; line-height: 1.5; }
 
 .modal-box h2 {
   margin: 0 0 14px;

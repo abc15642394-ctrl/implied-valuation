@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="17">
+<meta name="app-build" content="18">
 <meta name="theme-color" content="#18202e">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -28,7 +28,10 @@
 <header class="topbar">
   <h1>隱含估值追蹤</h1>
   <div class="topbar-actions">
+    <span id="envTag" class="env-tag" hidden></span>
+    <span id="freshTag" class="nudge" hidden></span>
     <span id="exportNudge" class="nudge" hidden></span>
+    <button type="button" id="syncBtn" class="ghost">同步</button>
     <button type="button" id="exportBtn" class="ghost">匯出</button>
     <button type="button" id="importBtn" class="ghost">匯入</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
@@ -145,7 +148,6 @@
 </section>
 
 <div class="status-bar">
-  <span id="envTag" class="env-tag" hidden></span>
   <span id="countLine">追蹤 0 檔</span>
   <button type="button" id="clearFilters" class="pill ghost" hidden>清除篩選</button>
 </div>
@@ -409,6 +411,53 @@
 
 <!-- 剪貼簿被瀏覽器擋下時的備援。寫成靜態標記，因為 data-close-modal 與
      點背景關閉都是在 bind() 啟動時一次綁完的，動態生出來的會關不掉。 -->
+<div id="importModeModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>要怎麼套用這個檔案？</h2>
+    <p id="importModeSummary" class="hint"></p>
+    <div class="modal-actions column">
+      <button type="button" id="importMerge" class="primary">合併（只增加，不覆蓋既有的）</button>
+      <button type="button" id="importReplace">整個取代（改過與刪掉的都會跟上）</button>
+      <button type="button" class="ghost" data-close-modal>取消</button>
+    </div>
+  </div>
+</div>
+
+<div id="syncModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>同步設定</h2>
+    <p class="hint">
+      電腦是正本：改完按「推上 gist」。手機是副本：按「拉最新」會<strong>整個覆蓋</strong>。
+      gist id 與 token 只存在這台裝置，不會被推上去。
+    </p>
+    <label>gist id
+      <input type="text" id="syncGistId" placeholder="網址最後那串 32 位英數" autocomplete="off" spellcheck="false">
+    </label>
+    <label>token（只有要「推」的裝置需要填）
+      <input type="password" id="syncToken" placeholder="classic token，只勾 gist 權限" autocomplete="off" spellcheck="false">
+    </label>
+    <p id="syncMsg" class="hint"></p>
+    <div class="modal-actions column">
+      <button type="button" id="syncPush" class="primary">推上 gist（把這台的資料變成最新）</button>
+      <button type="button" id="syncPull">拉最新（整個覆蓋這台）</button>
+      <button type="button" id="syncUndo" class="ghost" hidden>還原上一次取代</button>
+      <button type="button" class="ghost" data-close-modal>關閉</button>
+    </div>
+  </div>
+</div>
+
+<div id="backupBlocker" class="blocker" hidden>
+  <div class="blocker-box">
+    <h2>該備份了</h2>
+    <p id="blockerMsg"></p>
+    <div class="modal-actions column">
+      <button type="button" id="blockerPush" class="primary">現在推上 gist</button>
+      <button type="button" id="blockerExport">改成匯出成檔案</button>
+      <button type="button" id="blockerLater" class="ghost">今天先不要</button>
+    </div>
+  </div>
+</div>
+
 <div id="aiCopyModal" class="modal" hidden>
   <div class="modal-box">
     <h2>瀏覽器擋下了剪貼簿</h2>

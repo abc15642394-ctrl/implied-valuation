@@ -2,12 +2,13 @@
 (function () {
   'use strict';
 
-  var BUILD = 17;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 18;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
   var STALE_DAYS = 30;      // 超過 30 天沒更新就標記
-  var EXPORT_NUDGE_DAYS = 14;
+  var BACKUP_NUDGE_DAYS = 7;    // 備份提示變色
+  var BACKUP_BLOCK_DAYS = 14;   // 擋住畫面要求備份
   var HUGE = 1e12;          // 超過這個量級就不要印出一長串數字
 
   var sort = { key: 'gap', dir: 'asc' };
@@ -607,18 +608,80 @@
     }).join('');
   }
 
+  // 備份提醒分三種裝置，不是兩種：
+  //   能推（電腦）      → 看「幾天沒推」
+  //   只能拉（手機副本）→ 不提醒。資料是從 gist 拉下來的，本來就有備份；
+  //                      催它備份是噪音，而且擋版上沒有它能按的有效動作。
+  //   都沒設定          → 維持舊行為，看「幾天沒匯出」。少了這條，在他貼 token
+  //                      之前就完全沒有提醒，比現在還糟。
+  function backupState() {
+    if (Store.canPush()) {
+      return { kind: 'push', days: Store.daysSincePush(),
+               none: '還沒推上 gist', label: '上次推送' };
+    }
+    if (Store.canPull()) return { kind: 'replica' };   // 副本，不催
+    return { kind: 'export', days: Store.daysSinceExport(),
+             none: '還沒匯出過備份', label: '上次匯出' };
+  }
+
   function renderExportNudge() {
     var el = $('exportNudge');
-    var days = Store.daysSinceExport();
-    if (Store.getState().stocks.length === 0) { el.hidden = true; return; }
+    var b = backupState();
+    if (Store.getState().stocks.length === 0 || b.kind === 'replica') {
+      el.hidden = true;
+      return;
+    }
     el.hidden = false;
-    if (days === null) {
-      el.textContent = '還沒匯出過備份';
+    if (b.days === null) {
+      el.textContent = b.none;
       el.classList.add('stale');
     } else {
-      el.textContent = '上次匯出：' + (days === 0 ? '今天' : days + ' 天前');
-      el.classList.toggle('stale', days > EXPORT_NUDGE_DAYS);
+      el.textContent = b.label + '：' + (b.days === 0 ? '今天' : b.days + ' 天前');
+      el.classList.toggle('stale', b.days > BACKUP_NUDGE_DAYS);
     }
+  }
+
+  // 這台裝置的資料有多舊。只在「拉得到但推不了」的裝置上顯示——也就是手機。
+  // 單向同步最大的失敗模式是手機靜默過期：他在 LINE 查到一個看起來正常、
+  // 其實是兩週前的估值。這一格就是防這件事的，所以它必須在 topbar，不能要他滑。
+  function renderFreshTag() {
+    var el = $('freshTag');
+    if (!el) return;
+    if (Store.canPush() || !Store.canPull() || Store.getState().stocks.length === 0) {
+      el.hidden = true;
+      return;
+    }
+    var days = Store.daysSincePush();
+    el.hidden = false;
+    if (days === null) {
+      el.textContent = '來源時間不明';
+      el.classList.add('stale');
+    } else {
+      el.textContent = '電腦 ' + (days === 0 ? '今天' : days + ' 天前');
+      el.classList.toggle('stale', days > BACKUP_NUDGE_DAYS);
+    }
+  }
+
+  // 太久沒備份就擋住畫面。這一層刻意不是 .modal——closeAllModals() 會掃所有
+  // .modal，Esc 跟點背景都會呼叫它，那就擋不住了。
+  var blockerSnoozed = false;
+
+  function renderBackupBlocker() {
+    var el = $('backupBlocker');
+    if (!el) return;
+    var st = Store.getState();
+    if (blockerSnoozed || st.stocks.length === 0) { el.hidden = true; return; }
+    var b = backupState();
+    // 副本不擋：它的資料就是從 gist 來的，而且它也推不回去。
+    if (b.kind === 'replica') { el.hidden = true; return; }
+    if (!(b.days === null || b.days > BACKUP_BLOCK_DAYS)) { el.hidden = true; return; }
+    $('blockerMsg').textContent = b.days === null
+      ? '你的 ' + st.stocks.length + ' 檔 ' + st.records.length + ' 筆紀錄還沒有任何一份離機備份。'
+        + '瀏覽器的儲存區是會被清掉的——清掉就真的沒了。'
+      : '已經 ' + b.days + ' 天沒備份了（' + st.stocks.length + ' 檔 '
+        + st.records.length + ' 筆紀錄）。瀏覽器的儲存區是會被清掉的。';
+    $('blockerPush').hidden = !Store.canPush();
+    el.hidden = false;
   }
 
   // iOS 的 Safari、加到主畫面的 app、LINE 內建瀏覽器各有一份互不相通的 localStorage，
@@ -643,6 +706,137 @@
     el.title = '這份資料存在「' + el.textContent + '」裡。Safari、主畫面 app、'
       + 'LINE 內建瀏覽器各存一份，彼此看不到對方——換個地方打開筆數不一樣是正常的，不是資料不見了。';
     el.hidden = false;
+  }
+
+
+  // ---- 同步 ----
+
+  function afterDataSwap() {
+    renderSettings();
+    recalcCalculator();
+    render();
+    renderExportNudge();
+    renderFreshTag();
+    renderBackupBlocker();
+    $('syncUndo').hidden = !Store.hasUndo();
+  }
+
+  function syncMsg(text, bad) {
+    var el = $('syncMsg');
+    el.textContent = text;
+    el.classList.toggle('error-text', !!bad);
+  }
+
+  function openSync() {
+    var c = Store.deviceConfig();
+    $('syncGistId').value = c.gistId;
+    $('syncToken').value = c.token;
+    $('syncUndo').hidden = !Store.hasUndo();
+    syncMsg('');
+    $('syncModal').hidden = false;
+  }
+
+  function saveSyncConfig() {
+    Store.setDeviceConfig({ gistId: $('syncGistId').value, token: $('syncToken').value });
+    renderExportNudge();
+    renderFreshTag();
+    renderBackupBlocker();
+  }
+
+  function doPush(onDone) {
+    saveSyncConfig();
+    if (!Store.canPush()) { syncMsg('要推的話 gist id 與 token 兩個都得填。', true); return; }
+    syncMsg('推送中…');
+    Store.pushToGist().then(function (r) {
+      if (!r.ok) { syncMsg('推送失敗：' + r.error, true); return; }
+      syncMsg('已推上去（' + Store.getState().stocks.length + ' 檔 '
+        + Store.getState().records.length + ' 筆）。');
+      renderExportNudge();
+      renderFreshTag();
+      blockerSnoozed = false;
+      renderBackupBlocker();
+      if (onDone) onDone();
+    });
+  }
+
+  // 拉＝整個取代。所以先抓、先驗、先讓他看清楚會變成什麼，全部過了才換。
+  // 抓失敗、驗不過、或「來源是空的而本機不是」都絕不動到本機資料。
+  function doPull() {
+    saveSyncConfig();
+    if (!Store.canPull()) { syncMsg('要先填 gist id。', true); return; }
+    syncMsg('抓取中…');
+    Store.fetchFromGist().then(function (r) {
+      if (!r.ok) { syncMsg('抓取失敗：' + r.error + '（本機資料沒有被動到）', true); return; }
+      var pv = Store.replacePreview(r.data);
+      if (!pv.ok) { syncMsg('抓回來的內容有問題：' + pv.error + '（本機資料沒有被動到）', true); return; }
+
+      var msg = '這會把這台的資料整個換掉：'
+        + pv.fromStocks + ' 檔 ' + pv.fromRecords + ' 筆 → '
+        + pv.toStocks + ' 檔 ' + pv.toRecords + ' 筆。'
+        + '正在試算的沙盒草稿也會換成來源那邊的。';
+      if (pv.emptyingNonEmpty) {
+        msg = '⚠️ 來源是空的（0 檔）。繼續的話，這台的 '
+          + pv.fromStocks + ' 檔 ' + pv.fromRecords + ' 筆會被清空。\n\n'
+          + '如果你還沒從電腦推過資料上去，現在按下去就會把這台清光——應該先去電腦推一次。\n\n'
+          + '真的要繼續嗎？';
+      } else if (pv.shrinkingALot) {
+        msg = '⚠️ 來源比這台少很多（' + pv.fromStocks + ' 檔 → ' + pv.toStocks + ' 檔）。\n\n'
+          + msg + '\n\n真的要繼續嗎？';
+      } else {
+        msg += '\n\n要繼續嗎？';
+      }
+      if (!confirm(msg)) { syncMsg('已取消，本機資料沒有被動到。'); return; }
+
+      var res = Store.replaceAll(r.data);
+      if (!res.ok) { syncMsg('取代失敗：' + res.error + '（本機資料沒有被動到）', true); return; }
+      afterDataSwap();
+      syncMsg('已更新成 ' + res.stocks + ' 檔 ' + res.records + ' 筆。按「還原上一次取代」可以救回來。');
+    });
+  }
+
+  // ---- 匯入：合併還是取代 ----
+
+  var pendingImport = null;
+
+  function askImportMode(data) {
+    var p = Store.previewImport(data);
+    if (!p.ok) { alert('無法匯入：' + p.error); return; }
+    var pv = Store.replacePreview(data);
+    pendingImport = data;
+    $('importModeSummary').textContent =
+      '檔案裡有 ' + pv.toStocks + ' 檔 ' + pv.toRecords + ' 筆；這台目前是 '
+      + pv.fromStocks + ' 檔 ' + pv.fromRecords + ' 筆。'
+      + '合併只會增加（改過與刪掉的不會跟上）；取代會讓這台變成跟檔案一模一樣。';
+    $('importModeModal').hidden = false;
+  }
+
+  function runImportMerge() {
+    if (!pendingImport) return;
+    Store.applyImport(pendingImport);
+    pendingImport = null;
+    closeAllModals();
+    afterDataSwap();
+  }
+
+  function runImportReplace() {
+    if (!pendingImport) return;
+    var pv = Store.replacePreview(pendingImport);
+    var warn = '';
+    if (pv.emptyingNonEmpty) {
+      warn = '⚠️ 這個檔案是空的（0 檔），繼續會把這台的 ' + pv.fromStocks + ' 檔清空。\n\n';
+    } else if (pv.shrinkingALot) {
+      warn = '⚠️ 這個檔案比這台少很多（' + pv.fromStocks + ' → ' + pv.toStocks + ' 檔）。\n\n';
+    }
+    if (!confirm(warn + '取代後：' + pv.fromStocks + ' 檔 ' + pv.fromRecords + ' 筆 → '
+        + pv.toStocks + ' 檔 ' + pv.toRecords + ' 筆。正在試算的沙盒草稿也會換成檔案裡的。\n\n要繼續嗎？')) {
+      return;
+    }
+    var res = Store.replaceAll(pendingImport);
+    pendingImport = null;
+    closeAllModals();
+    if (!res.ok) { alert('取代失敗：' + res.error + '（本機資料沒有被動到）'); return; }
+    afterDataSwap();
+    alert('已取代成 ' + res.stocks + ' 檔 ' + res.records + ' 筆。到「同步」可以還原上一次取代。');
   }
 
   function renderSettings() {
@@ -2168,6 +2362,39 @@
     $('exportBtn').addEventListener('click', function () {
       Store.exportJson();
       renderExportNudge();
+      blockerSnoozed = false;
+      renderBackupBlocker();
+    });
+
+    $('syncBtn').addEventListener('click', openSync);
+    $('syncPush').addEventListener('click', function () { doPush(); });
+    $('syncPull').addEventListener('click', doPull);
+    $('syncGistId').addEventListener('change', saveSyncConfig);
+    $('syncToken').addEventListener('change', saveSyncConfig);
+    $('syncUndo').addEventListener('click', function () {
+      if (!confirm('把資料還原成上一次「取代」之前的狀態？這一步沒有再上一層的還原。')) return;
+      if (Store.undoReplace()) { afterDataSwap(); syncMsg('已還原。'); }
+      else { syncMsg('沒有可還原的快照。', true); }
+    });
+
+    $('importMerge').addEventListener('click', runImportMerge);
+    $('importReplace').addEventListener('click', runImportReplace);
+
+    // 擋版的三顆鈕。它不是 .modal，所以 Esc 與點背景都關不掉它——這是刻意的。
+    $('blockerPush').addEventListener('click', function () {
+      $('backupBlocker').hidden = true;
+      openSync();
+      doPush();
+    });
+    $('blockerExport').addEventListener('click', function () {
+      Store.exportJson();
+      renderExportNudge();
+      blockerSnoozed = true;
+      renderBackupBlocker();
+    });
+    $('blockerLater').addEventListener('click', function () {
+      blockerSnoozed = true;      // 只壓到這次重新載入為止，不寫進儲存
+      renderBackupBlocker();
     });
     $('importBtn').addEventListener('click', function () { $('importFile').click(); });
 
@@ -2180,17 +2407,7 @@
         try { data = JSON.parse(reader.result); }
         catch (err) { alert('這個檔案不是有效的 JSON'); return; }
 
-        var p = Store.previewImport(data);
-        if (!p.ok) { alert('無法匯入：' + p.error); return; }
-
-        var msg = '將新增 ' + p.newStocks + ' 檔股票、合併 ' + p.mergedStocks + ' 檔，共 ' + p.records + ' 筆紀錄';
-        if (p.skipped) msg += '，略過 ' + p.skipped + ' 筆沒有代號的紀錄';
-        if (!confirm(msg + '。要繼續嗎？')) return;
-
-        Store.applyImport(data);
-        renderSettings();
-        recalcCalculator();
-        render();
+        askImportMode(data);
       };
       reader.readAsText(file);
       this.value = '';
@@ -2344,6 +2561,7 @@
     Store.requestPersistence();
     renderSettings();
     renderEnvTag();
+    renderFreshTag();
     $('calcG610').value = settings().defaultCagr6_10;   // 只在載入時種一次
     $('newDate').value = Store.today();
     bind();
@@ -2351,6 +2569,7 @@
     var saved = 'list';
     try { saved = localStorage.getItem('iv-tab') || 'list'; } catch (e) {}
     setTab(saved);                 // setTab 內部會呼叫 render()
+    renderBackupBlocker();         // 要在資料載入與 render 之後才算得準
     registerServiceWorker();
   }
 

@@ -12,6 +12,15 @@
   var STORAGE_KEY = 'iv-calc-v1';   // key 不動，靠 schemaVersion 分辨格式
   var SCHEMA_VERSION = 2;
 
+  // 這台裝置自己的設定：gist id 與 token。
+  // **絕對不能放進 state。** 「推上 gist」推的就是整個 state，token 一旦在裡面，
+  // 等於把它明文寫進 gist——而 secret gist 是「有網址就看得到」。所以另開一個 key，
+  // 它永遠不會被推出去，也不會被「拉最新」的覆蓋動到。
+  var DEVICE_KEY = 'iv-device-v1';
+
+  // 取代前的還原快照。只留一份，誤按「取代」時救得回來。
+  var UNDO_KEY = 'iv-undo-v1';
+
   // 隱含總表的顏色分帶：四條界線切出五個分帶。使用者可以自己改。
   // 舊資料沒有這個欄位，readSettings 會補上預設值，所以不需要升 schemaVersion。
   var DEFAULT_BANDS = [0, 10, 20, 30];
@@ -24,7 +33,10 @@
       records: [],
       // AI insight 是試算沙盒：只存「被改過的欄位」，沒有的欄位代表跟著真實資料走。
       aiDraft: {},
-      lastExportAt: null
+      lastExportAt: null,
+      // 最後一次推上 gist 的時間。放在 state 裡是刻意的：它會跟著同步到手機，
+      // 手機才算得出「這份資料是電腦什麼時候推的」。
+      lastPushAt: null
     };
   }
 
@@ -294,6 +306,9 @@
     });
 
     out.lastExportAt = incoming && typeof incoming.lastExportAt === 'string' ? incoming.lastExportAt : null;
+    // lastPushAt 也要帶過來——手機靠它算出「這份資料是電腦什麼時候推的」。
+    // 漏掉的話手機永遠顯示「從沒推過」，過期資料就看不出來了。
+    out.lastPushAt = incoming && typeof incoming.lastPushAt === 'string' ? incoming.lastPushAt : null;
     return out;
   }
 
@@ -648,6 +663,198 @@
 
   // ---- 資料安全 ----
 
+
+  // ---- 取代匯入（跟上面的合併並存，不是取代它）----
+  //
+  // 合併是為了「還原備份」「併入另一台的資料」而設計的，刻意只增不改：
+  // 改過的紀錄因為 id 沒變會被跳過，刪掉的因為沒有墓碑而無法分辨。
+  // 要讓電腦當正本、手機當副本，需要的是「整個換掉」——那同時解掉改與刪，
+  // 而且不需要時間戳也不需要墓碑。
+  function replaceAll(incoming) {
+    var p = parseIncoming(incoming);
+    if (!p.ok) return p;
+
+    // 取代前先留一份還原快照。資料才十幾 KB，一份 undo 很便宜，
+    // 而這是破壞性操作，誤按時沒有它就真的回不來了。
+    try { localStorage.setItem(UNDO_KEY, JSON.stringify(state)); }
+    catch (err) { console.error('還原快照寫不進去', err); }
+
+    state = p.data;
+    persist();
+    return { ok: true, stocks: state.stocks.length, records: state.records.length };
+  }
+
+  // 取代之後要先問一次的情形：來源是空的，本機不是。
+  // gist 剛建立時放的就是一份「合法但 0 檔」的空白 state，驗證擋不住它，
+  // 第一次推之前誤按「拉最新」會把本機清光。
+  function replacePreview(incoming) {
+    var p = parseIncoming(incoming);
+    if (!p.ok) return p;
+    return {
+      ok: true,
+      fromStocks: state.stocks.length,
+      fromRecords: state.records.length,
+      toStocks: p.data.stocks.length,
+      toRecords: p.data.records.length,
+      emptyingNonEmpty: p.data.stocks.length === 0 && state.stocks.length > 0,
+      shrinkingALot: state.stocks.length > 0
+        && p.data.stocks.length < state.stocks.length / 2
+    };
+  }
+
+  function hasUndo() {
+    try { return !!localStorage.getItem(UNDO_KEY); } catch (e) { return false; }
+  }
+
+  function undoReplace() {
+    var raw;
+    try { raw = localStorage.getItem(UNDO_KEY); } catch (e) { return false; }
+    if (!raw) return false;
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return false; }
+    state = adopt(parsed);
+    persist();
+    try { localStorage.removeItem(UNDO_KEY); } catch (e) {}
+    return true;
+  }
+
+  // ---- 這台裝置自己的設定（gist id 與 token）----
+  //
+  // 再說一次為什麼不放 state：推上 gist 推的是整個 state，token 在裡面就等於
+  // 把它明文公開。這個 key 不同步、不匯出、也不被取代動到。
+  function deviceConfig() {
+    var raw;
+    try { raw = localStorage.getItem(DEVICE_KEY); } catch (e) { return { gistId: '', token: '' }; }
+    if (!raw) return { gistId: '', token: '' };
+    try {
+      var d = JSON.parse(raw);
+      return {
+        gistId: typeof d.gistId === 'string' ? d.gistId.trim() : '',
+        token: typeof d.token === 'string' ? d.token.trim() : ''
+      };
+    } catch (e) { return { gistId: '', token: '' }; }
+  }
+
+  function setDeviceConfig(patch) {
+    var cur = deviceConfig();
+    if ('gistId' in patch) cur.gistId = String(patch.gistId || '').trim();
+    if ('token' in patch) cur.token = String(patch.token || '').trim();
+    try { localStorage.setItem(DEVICE_KEY, JSON.stringify(cur)); } catch (e) {}
+    return cur;
+  }
+
+  // 這台裝置能不能推？沒有 token 就只能拉。提醒與強制擋都看這個，
+  // 否則手機會跳出一個它根本做不到的要求。
+  function canPush() { var c = deviceConfig(); return !!(c.token && c.gistId); }
+  function canPull() { return !!deviceConfig().gistId; }
+
+  function markPushed() {
+    state.lastPushAt = nowIso();
+    persist();
+    return state.lastPushAt;
+  }
+
+  function daysSincePush() {
+    if (!state.lastPushAt) return null;
+    var then = new Date(state.lastPushAt).getTime();
+    if (!isFinite(then)) return null;
+    return Math.floor((Date.now() - then) / 86400000);
+  }
+
+
+  // ---- gist 單向同步 ----
+  //
+  // 電腦推、手機拉。推要 token（走 api.github.com），拉只要 gist id（抓 raw），
+  // 所以手機完全不必碰 token。
+  //
+  // 鐵則：**任何失敗都不准動到本機資料。** 先抓、先驗、全部過了才換。
+  // 「抓失敗 → 本機被清空」是這個功能唯一不可接受的結局。
+  var GIST_FILE = 'iv-data.json';
+
+  function pushToGist() {
+    var c = deviceConfig();
+    if (!c.token || !c.gistId) {
+      return Promise.resolve({ ok: false, error: '還沒填 gist id 或 token' });
+    }
+    var files = {};
+    files[GIST_FILE] = { content: JSON.stringify(state, null, 2) };
+    return fetch('https://api.github.com/gists/' + encodeURIComponent(c.gistId), {
+      method: 'PATCH',
+      headers: {
+        'Authorization': 'Bearer ' + c.token,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ files: files })
+    }).then(function (res) {
+      if (res.status === 401 || res.status === 403) {
+        return { ok: false, error: 'token 被拒絕（可能過期，或沒有勾 gist 權限）' };
+      }
+      if (res.status === 404) {
+        return { ok: false, error: '找不到這個 gist。gist id 可能打錯了' };
+      }
+      if (!res.ok) return { ok: false, error: 'GitHub 回應 ' + res.status };
+      markPushed();
+      return { ok: true, at: state.lastPushAt };
+    }).catch(function (err) {
+      return { ok: false, error: '連不上 GitHub：' + err.message };
+    });
+  }
+
+  // 只負責「抓回來並驗證」，不碰 state。要不要取代由呼叫端在看過
+  // replacePreview 之後決定——這就是失敗不動資料的做法。
+  function fetchFromGist() {
+    var c = deviceConfig();
+    if (!c.gistId) return Promise.resolve({ ok: false, error: '還沒填 gist id' });
+
+    // 走 API 而不是 raw 網址：raw 有 CDN 快取，推完立刻拉可能拿到舊的。
+    // 破快取參數與 no-store 兩道都加。
+    //
+    // 有 token 就帶上。手機沒有 token，靠的是「secret gist 任何人有 id 都讀得到」——
+    // 這一點我沒辦法事先驗證（要有他的 secret gist 才測得出來），所以 404 時的訊息
+    // 要把這個可能性講出來，不要只說「id 打錯」。
+    var url = 'https://api.github.com/gists/' + encodeURIComponent(c.gistId)
+      + '?_=' + Date.now();
+    var headers = { 'Accept': 'application/vnd.github+json' };
+    if (c.token) headers['Authorization'] = 'Bearer ' + c.token;
+    return fetch(url, { headers: headers, cache: 'no-store' })
+      .then(function (res) {
+        if (res.status === 401 || res.status === 403) {
+          return { ok: false, error: 'token 被拒絕（可能過期，或沒有勾 gist 權限）。'
+            + '這台裝置只要「拉」的話，其實可以把 token 留空。' };
+        }
+        if (res.status === 404) {
+          return { ok: false, error: c.token
+            ? '找不到這個 gist。gist id 可能打錯了'
+            : '找不到這個 gist。可能是 id 打錯，也可能是這個 gist 不允許未登入讀取——'
+              + '若 id 確定沒錯，請回報，這台裝置就需要改填 token。' };
+        }
+        if (!res.ok) return { ok: false, error: 'GitHub 回應 ' + res.status };
+        return res.json().then(function (g) {
+          var f = g.files && (g.files[GIST_FILE] || g.files[Object.keys(g.files)[0]]);
+          if (!f) return { ok: false, error: 'gist 裡沒有檔案' };
+          if (f.truncated && f.raw_url) {
+            return fetch(f.raw_url + '?_=' + Date.now(), { cache: 'no-store' })
+              .then(function (r2) { return r2.text(); })
+              .then(function (t) { return parseGistText(t); });
+          }
+          return parseGistText(f.content);
+        });
+      })
+      .catch(function (err) {
+        return { ok: false, error: '連不上 GitHub：' + err.message };
+      });
+  }
+
+  function parseGistText(text) {
+    var data;
+    try { data = JSON.parse(text); }
+    catch (e) { return { ok: false, error: 'gist 裡的內容不是有效的 JSON' }; }
+    var p = parseIncoming(data);
+    if (!p.ok) return { ok: false, error: p.error };
+    return { ok: true, data: data };   // 回傳原始物件，交給 replacePreview／replaceAll
+  }
+
   function requestPersistence() {
     if (!navigator.storage || !navigator.storage.persist) return Promise.resolve(null);
     return navigator.storage.persisted()
@@ -698,6 +905,18 @@
     exportJson: exportJson,
     previewImport: previewImport,
     applyImport: applyImport,
+    replacePreview: replacePreview,
+    replaceAll: replaceAll,
+    hasUndo: hasUndo,
+    undoReplace: undoReplace,
+    deviceConfig: deviceConfig,
+    setDeviceConfig: setDeviceConfig,
+    canPush: canPush,
+    canPull: canPull,
+    pushToGist: pushToGist,
+    fetchFromGist: fetchFromGist,
+    markPushed: markPushed,
+    daysSincePush: daysSincePush,
     requestPersistence: requestPersistence,
     canPersist: canPersist,
     daysSinceExport: daysSinceExport
