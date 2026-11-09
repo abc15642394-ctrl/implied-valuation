@@ -543,14 +543,48 @@
 
   // ---- 匯出 / 匯入 ----
 
+  function exportFileName() { return '隱含估值-' + today() + '.json'; }
+  function exportBlob() {
+    return new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  }
+
+  // iOS 的主畫面 app 裡，<a download> 配 blob 網址常常沒反應或直接把 JSON 當文字
+  // 開啟——也就是說「擋版叫你備份、你按了卻沒事發生」。所以會跑在手機上的那條
+  // 路徑要先試系統分享面板（可以選「儲存到檔案」「存到 iCloud 雲端硬碟」），
+  // 不支援再回退到既有的下載。
+  //
+  // 桌機的「匯出」維持原本的下載，不動——那條路本來就能用，而且他習慣了。
+  function shareJson() {
+    var file;
+    try {
+      file = new File([exportBlob()], exportFileName(), { type: 'application/json' });
+    } catch (e) { file = null; }
+
+    var canShare = file && navigator.share && navigator.canShare
+      && navigator.canShare({ files: [file] });
+    if (!canShare) { exportJson(); return Promise.resolve({ ok: true, how: 'download' }); }
+
+    // 時間戳在分享成功之後才記——使用者在面板上按取消不算備份過。
+    return navigator.share({ files: [file] }).then(function () {
+      state.lastExportAt = nowIso();
+      persist();
+      return { ok: true, how: 'share' };
+    }).catch(function (err) {
+      // AbortError＝他自己按取消，那是正常操作，不要退到下載再給他一個檔案。
+      if (err && err.name === 'AbortError') return { ok: false, cancelled: true };
+      exportJson();
+      return { ok: true, how: 'download' };
+    });
+  }
+
   function exportJson() {
     state.lastExportAt = nowIso();
     persist();
-    var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    var blob = exportBlob();
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
-    a.download = '隱含估值-' + today() + '.json';
+    a.download = exportFileName();
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -913,6 +947,7 @@
     countAiDrafts: countAiDrafts,
     localDate: localDate,
     exportJson: exportJson,
+    shareJson: shareJson,
     previewImport: previewImport,
     applyImport: applyImport,
     replacePreview: replacePreview,

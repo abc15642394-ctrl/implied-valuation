@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 19;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 20;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -2386,11 +2386,16 @@
       openSync();
       doPush();
     });
+    // 這顆可能跑在手機上，所以走 shareJson（系統分享面板，不支援才退到下載）。
+    // iOS 主畫面 app 裡的 <a download> 常常沒反應——擋版叫人備份卻按了沒事發生，
+    // 是這個功能最糟的失敗方式。
     $('blockerExport').addEventListener('click', function () {
-      Store.exportJson();
-      renderExportNudge();
-      blockerSnoozed = true;
-      renderBackupBlocker();
+      Store.shareJson().then(function (r) {
+        renderExportNudge();
+        if (r && r.cancelled) return;        // 他自己取消，擋版留著
+        blockerSnoozed = true;
+        renderBackupBlocker();
+      });
     });
     $('blockerLater').addEventListener('click', function () {
       blockerSnoozed = true;      // 只壓到這次重新載入為止，不寫進儲存
