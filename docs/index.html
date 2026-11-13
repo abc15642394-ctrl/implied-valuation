@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="21">
+<meta name="app-build" content="22">
 <meta name="theme-color" content="#18202e">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -232,6 +232,15 @@
 
   <p id="closeBanner" class="close-banner" hidden></p>
 
+  <section id="inboxBox" class="panel inbox-box" hidden>
+    <h2 class="sec-title">你在這支手機上估過，還沒正式建檔</h2>
+    <p class="hint">手機的資料會被下次「拉最新」整個覆蓋，所以這些沒有寫進追蹤清單。回到電腦再正式建檔。</p>
+    <div id="inboxList"></div>
+    <div class="modal-actions">
+      <button type="button" id="inboxCopy" class="pill">複製成文字</button>
+    </div>
+  </section>
+
   <p id="summaryEmpty" class="empty" hidden></p>
 
   <div class="table-wrap sum-wrap" id="summaryWrap" hidden>
@@ -421,6 +430,39 @@
       <button type="button" id="importMerge" class="primary">合併（只增加，不覆蓋既有的）</button>
       <button type="button" id="importReplace">整個取代（改過與刪掉的都會跟上）</button>
       <button type="button" class="ghost" data-close-modal>取消</button>
+    </div>
+  </div>
+</div>
+
+<div id="pickModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>這段文字裡找到好幾檔</h2>
+    <p class="hint">點一檔繼續。</p>
+    <div id="pickList" class="modal-actions column"></div>
+    <div class="modal-actions"><button type="button" class="ghost" data-close-modal>取消</button></div>
+  </div>
+</div>
+
+<div id="quickModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2 id="quickTitle">快速估一下</h2>
+    <p class="hint" id="quickHint"></p>
+    <div class="quick-grid">
+      <label>代號<input type="text" id="quickTicker" autocomplete="off" spellcheck="false"></label>
+      <label>現價<span class="field"><input type="number" step="any" inputmode="decimal" id="quickPrice"><i>元</i></span></label>
+      <label>EPS<span class="field"><input type="number" step="any" inputmode="decimal" id="quickEps"><i>元</i></span></label>
+      <label>1-5 年<span class="field"><input type="number" step="any" inputmode="decimal" id="quickG15"><i>%</i></span></label>
+      <label>6-10 年<span class="field"><input type="number" step="any" inputmode="decimal" id="quickG610"><i>%</i></span></label>
+    </div>
+    <div id="quickResult" class="calc-result">
+      <div class="res-row c-market"><span>市場隱含 1-5 年</span><b id="quickImplied">—</b></div>
+      <div class="res-row c-mine"><span>我估的合理價</span><b id="quickFair">—</b></div>
+      <div class="res-row c-signal"><span>落差（隱含 − 我估）</span><b id="quickGap">—</b></div>
+    </div>
+    <p class="hint" id="quickAssume"></p>
+    <div class="modal-actions column">
+      <button type="button" id="quickSave" class="primary">加入追蹤</button>
+      <button type="button" class="ghost" data-close-modal>只是算一下，不存</button>
     </div>
   </div>
 </div>

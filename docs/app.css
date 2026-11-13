@@ -1621,6 +1621,44 @@ input[readonly], select:disabled {
 
 .close-banner .pill { margin-left: 8px; }
 
+/* 快速估值彈窗。五格而不是四格——6-10 年成長率必須是獨立欄位：
+   實測它從 2% 變 5% 會讓合理價差 9.9%、市場隱含差 2.46pp，而落差的訊號門檻
+   是 ±5pp，2.46pp 足以讓紅綠燈翻面。靜悄悄套預設值等於給他一個沒選過的結論。 */
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.quick-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+#pickList button { text-align: left; }
+
+/* 手機暫存區。存得住卻看不到等於沒存，所以一定要有這一塊。 */
+.inbox-box { margin: 0 0 14px; border-left: 4px solid var(--c-market); }
+
+.inbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: .85rem;
+}
+
+.inbox-row:last-child { border-bottom: none; }
+.inbox-row .ib-code { font-weight: 700; min-width: 72px; }
+.inbox-row .ib-num { color: var(--muted); }
+.inbox-row .del { margin-left: auto; }
+
 .fair-only { margin-top: 18px; border-left: 4px solid var(--c-mine); }
 .fair-only .sec-title { color: var(--text); font-size: .95rem; }
 

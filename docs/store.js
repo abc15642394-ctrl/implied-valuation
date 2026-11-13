@@ -939,6 +939,99 @@
     return Object.keys(set).sort();
   }
 
+  // ---- 從一段文字裡找出股票（LINE 直達用）----
+  //
+  // 收到的是整段 LINE 訊息，不是乾淨的代號。盲目比對 2375 檔名錄會慘不忍睹，
+  // 實測過：
+  //   「2027 年才看得到貢獻」→ 2027 是大成鋼的代號
+  //   「統一發票開獎，大同電鍋很好用，中鋼結構補強」→ 一句話誤中 5 檔
+  // 名錄裡有 1243 個兩字名稱，兩字詞在中文句子裡太容易撞到。
+  //
+  // 所以分兩層，信心不同、規則也不同：
+  //   追蹤清單：他自己的股票，代號或完整名稱都算，兩字名稱也認。
+  //   名錄：他對這些沒有立場，規則嚴格得多（見下）。
+  var CODE_RE = /(?:^|[^0-9A-Za-z])([0-9]{4,5}[A-Z]?)(?![0-9A-Za-z])/g;
+  // 代號後面緊跟這些，代表它是年份或數量，不是股票
+  var AFTER_RE = /^\s*(年|月|日|季|元|塊|點|％|%|萬|億|股|張)/;
+  // 這些詞後面的數字是價格，不是代號
+  var BEFORE_RE = /(目標價|股價|現價|收盤|收|漲到|跌到|來到|上看|價位|均價|成本)\s*$/;
+  var MIN_DIR_NAME = 3;   // 名錄的名稱至少三個字才採信
+
+  function matchTickers(text) {
+    text = String(text || '');
+    if (!text.trim()) return [];
+    var hits = {}, order = [];
+
+    function add(code, name, source) {
+      if (hits[code]) return;
+      hits[code] = true;
+      order.push({ code: code, name: name, source: source });
+    }
+
+    state.stocks.forEach(function (st) {
+      var t = String(st.ticker || '').trim();
+      var n = String(st.name || '').trim();
+      if ((t && text.indexOf(t) !== -1) || (n && text.indexOf(n) !== -1)) {
+        add(t, n, 'tracked');
+      }
+    });
+
+    if (closes) {
+      CODE_RE.lastIndex = 0;
+      var m;
+      while ((m = CODE_RE.exec(text)) !== null) {
+        var code = m[1];
+        var at = m.index + m[0].length - code.length;
+        if (!closes[code]) continue;
+        if (AFTER_RE.test(text.slice(at + code.length))) continue;
+        if (BEFORE_RE.test(text.slice(0, at))) continue;
+        add(code, closes[code][0], 'directory');
+      }
+      Object.keys(closes).forEach(function (code) {
+        var n = closes[code][0];
+        if (!n || n.length < MIN_DIR_NAME) return;
+        if (text.indexOf(n) !== -1) add(code, n, 'directory');
+      });
+    }
+    return order;
+  }
+
+  // ---- 手機暫存區 ----
+  //
+  // 手機是唯讀副本，寫進真實資料會被下一次「拉最新」整個覆蓋掉。所以在手機上
+  // 臨時估的東西放這個獨立的 key，取代只換 iv-calc-v1，碰不到它。
+  var INBOX_KEY = 'iv-inbox-v1';
+
+  function inbox() {
+    try {
+      var raw = localStorage.getItem(INBOX_KEY);
+      var a = raw ? JSON.parse(raw) : [];
+      return Array.isArray(a) ? a : [];
+    } catch (e) { return []; }
+  }
+
+  function addToInbox(entry) {
+    var list = inbox();
+    list.unshift({
+      id: newId('ib_'),
+      ticker: String(entry.ticker || '').trim(),
+      name: String(entry.name || '').trim(),
+      price: numOrNull(entry.price),
+      eps: numOrNull(entry.eps),
+      myCagr1_5: numOrNull(entry.myCagr1_5),
+      cagr6_10: numOrNull(entry.cagr6_10),
+      at: nowIso()
+    });
+    try { localStorage.setItem(INBOX_KEY, JSON.stringify(list.slice(0, 50))); } catch (e) {}
+    return list;
+  }
+
+  function removeFromInbox(id) {
+    var list = inbox().filter(function (x) { return x.id !== id; });
+    try { localStorage.setItem(INBOX_KEY, JSON.stringify(list)); } catch (e) {}
+    return list;
+  }
+
   function requestPersistence() {
     if (!navigator.storage || !navigator.storage.persist) return Promise.resolve(null);
     return navigator.storage.persisted()
@@ -1006,6 +1099,10 @@
     closeOf: closeOf,
     hasCloses: hasCloses,
     closeDates: closeDates,
+    matchTickers: matchTickers,
+    inbox: inbox,
+    addToInbox: addToInbox,
+    removeFromInbox: removeFromInbox,
     requestPersistence: requestPersistence,
     canPersist: canPersist,
     daysSinceExport: daysSinceExport

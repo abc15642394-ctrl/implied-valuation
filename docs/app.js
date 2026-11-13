@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 21;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 22;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -904,6 +904,171 @@
     return true;
   }
 
+  // ---- 從 LINE 直達 ----
+  //
+  // iOS 捷徑把整段訊息丟進 ?q=。比對規則在 Store.matchTickers，不是在捷徑裡——
+  // 捷徑抓 4 位數字會把「2027 年」當成大成鋼（2027 真的是它的代號）。
+  function handleIncomingQuery() {
+    var q;
+    try { q = new URLSearchParams(location.search).get('q'); } catch (e) { q = null; }
+    if (!q) return;
+
+    // 處理完就把參數清掉，否則他之後重新整理會一直重跑同一段文字。
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+
+    var hits = Store.matchTickers(q);
+    if (!hits.length) { openQuick(null, q); return; }
+    if (hits.length === 1) { goToHit(hits[0]); return; }
+    openPicker(hits);
+  }
+
+  function openPicker(hits) {
+    $('pickList').innerHTML = hits.slice(0, 8).map(function (h) {
+      return '<button type="button" data-pick="' + esc(h.code) + '">'
+        + esc(h.code) + '　' + esc(h.name || '')
+        + (h.source === 'tracked' ? '　<span class="hint-inline">已追蹤</span>' : '')
+        + '</button>';
+    }).join('');
+    pickCache = hits;
+    $('pickModal').hidden = false;
+  }
+
+  var pickCache = [];
+
+  function goToHit(hit) {
+    // findByTicker 的簽名是 (market, ticker)——漏了第一個參數會永遠找不到。
+    var stock = Store.findByTicker('TW', hit.code);
+    var tracked = stock && Store.countOf(stock.id) > 0;
+    if (tracked) {
+      // 命中且估過 → 篩成那一檔。注意 filteredStocks 問的是「代號名稱是否包含
+      // 搜尋字」，所以這裡要塞的是代號，不能把整段訊息塞進去——那會把每一檔都濾掉。
+      filters = defaultFilters();
+      filters.text = hit.code;
+      $('filterText').value = hit.code;
+      setTab('summary');
+      render();
+      return;
+    }
+    // 有這檔但一筆紀錄都沒有，跟「沒有這檔」是兩回事，訊息要分開講。
+    openQuick(hit, null, stock ? '你追蹤了 ' + hit.code + ' 但還沒估過。' : null);
+  }
+
+  function openQuick(hit, rawText, note) {
+    var code = hit ? hit.code : '';
+    var c = code ? Store.closeOf(code) : null;
+    $('quickTicker').value = code;
+    $('quickPrice').value = c ? c.price : '';
+    $('quickEps').value = '';
+    $('quickG15').value = '';
+    $('quickG610').value = settings().defaultCagr6_10;
+    $('quickTitle').textContent = hit && hit.name ? hit.name + '（' + code + '）' : '快速估一下';
+    $('quickHint').textContent = note ? note
+      : (hit ? '這一檔你還沒估過。' + (c ? c.date + ' 收盤 ' + fmtNum(c.price) + '，已經幫你填好。' : '')
+             : '這段文字裡沒有找到你追蹤的股票，也沒對上名錄。代號自己填。');
+    $('quickAssume').textContent = '折現率 ' + fmtPct(settings().discountRate)
+      + '、永續成長率 ' + fmtPct(settings().perpetualGrowth) + '（跟著設定走）';
+    recalcQuick();
+    $('quickModal').hidden = false;
+  }
+
+  function recalcQuick() {
+    var st = settings();
+    var price = numOrNull($('quickPrice').value);
+    var eps = numOrNull($('quickEps').value);
+    var g15 = numOrNull($('quickG15').value);
+    var g610 = numOrNull($('quickG610').value);
+    var rec = { price: price, eps: eps === null ? 0 : eps, myCagr1_5: g15,
+                cagr6_10: g610 === null ? st.defaultCagr6_10 : g610 };
+    var c = computeRecord(rec, st);
+    $('quickImplied').innerHTML = c.impliedStatus === 'ok'
+      ? fmtPct(c.implied) : impliedHtml(c, rec.eps, price, '現價');
+    $('quickFair').textContent = c.fairValue === null ? '—' : fmtNum(c.fairValue);
+    $('quickGap').innerHTML = gapHtml(c);
+  }
+
+  function saveQuick() {
+    var ticker = String($('quickTicker').value || '').trim();
+    if (!ticker) { alert('要先填代號。'); return; }
+    var price = numOrNull($('quickPrice').value);
+    var eps = numOrNull($('quickEps').value);
+    var g15 = numOrNull($('quickG15').value);
+    var g610 = numOrNull($('quickG610').value);
+    if (price === null && g15 === null) {
+      alert('現價和 1-5 年成長率至少要填一個：填現價會反推市場隱含，填成長率會算出合理價。');
+      return;
+    }
+    var c = Store.closeOf(ticker);
+
+    // 手機是唯讀副本：寫進真實資料會被下一次「拉最新」整個覆蓋掉，而且是靜默的。
+    // 所以手機存進獨立的暫存區，取代碰不到它。
+    if (!Store.canPush() && Store.canPull()) {
+      Store.addToInbox({ ticker: ticker, name: c ? c.name : '', price: price,
+                         eps: eps, myCagr1_5: g15, cagr6_10: g610 });
+      closeAllModals();
+      alert('已存到這支手機的暫存區（' + Store.inbox().length + ' 筆）。\n\n'
+        + '沒有寫進追蹤清單，因為手機的資料會被下次「拉最新」覆蓋掉。回到電腦再正式建檔。');
+      return;
+    }
+
+    // market 一定要給：stockKey 是 market + ':' + ticker，少了它會把既有的那一檔
+    // 當成新的，變成重複。
+    var existing = Store.findByTicker('TW', ticker);
+    var stock = Store.upsertStock({
+      ticker: ticker,
+      name: (existing && existing.name) || (c ? c.name : ''),
+      market: 'TW',
+      status: (existing && existing.status) || 'watch',
+      tags: (existing && existing.tags) || [],
+      currentPrice: price
+    });
+    Store.addRecord(stock.id, {
+      date: Store.today(), label: '',
+      price: price, eps: eps, myCagr1_5: g15,
+      cagr6_10: g610 === null ? settings().defaultCagr6_10 : g610,
+      note: ''
+    });
+    closeAllModals();
+    filters = defaultFilters();
+    filters.text = ticker;
+    $('filterText').value = ticker;
+    setTab('summary');
+    render();
+  }
+
+  // ---- 手機暫存區的顯示 ----
+  //
+  // 存得住卻看不到等於沒存。這一塊只在有東西時出現。
+  function renderInbox() {
+    var box = $('inboxBox');
+    if (!box) return;
+    var list = Store.inbox();
+    if (!list.length) { box.hidden = true; return; }
+    $('inboxList').innerHTML = list.map(function (x) {
+      var bits = [];
+      if (x.price !== null) bits.push('現價 ' + fmtNum(x.price));
+      if (x.eps !== null) bits.push('EPS ' + fmtNum(x.eps));
+      if (x.myCagr1_5 !== null) bits.push('1-5 年 ' + fmtPct(x.myCagr1_5));
+      if (x.cagr6_10 !== null) bits.push('6-10 年 ' + fmtPct(x.cagr6_10));
+      return '<div class="inbox-row">'
+        + '<span class="ib-code">' + esc(x.ticker) + '</span>'
+        + '<span>' + esc(x.name || '') + '</span>'
+        + '<span class="ib-num">' + esc(bits.join('　')) + '</span>'
+        + '<button type="button" class="del" data-inbox-del="' + esc(x.id) + '" title="刪掉這一筆">✕</button>'
+        + '</div>';
+    }).join('');
+    box.hidden = false;
+  }
+
+  function inboxText() {
+    return Store.inbox().map(function (x) {
+      return [x.ticker, x.name,
+        x.price === null ? '' : x.price,
+        x.eps === null ? '' : x.eps,
+        x.myCagr1_5 === null ? '' : x.myCagr1_5 + '%',
+        x.cagr6_10 === null ? '' : x.cagr6_10 + '%'].join('\t');
+    }).join('\n');
+  }
+
   function renderSettings() {
     $('setDiscountRate').value = settings().discountRate;
     $('setPerpetualGrowth').value = settings().perpetualGrowth;
@@ -1352,6 +1517,7 @@
 
   function renderSummary() {
     renderCloseBanner();
+    renderInbox();
     var all = summaryRows();
     var withPrice = all.filter(hasPrice);
     var noPrice = all.filter(function (r) { return !hasPrice(r); });
@@ -2459,6 +2625,39 @@
     });
 
     $('importMerge').addEventListener('click', runImportMerge);
+
+    // LINE 直達的兩個彈窗
+    $('pickList').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-pick]');
+      if (!b) return;
+      var hit = pickCache.filter(function (h) { return h.code === b.dataset.pick; })[0];
+      closeAllModals();
+      if (hit) goToHit(hit);
+    });
+    ['quickPrice', 'quickEps', 'quickG15', 'quickG610'].forEach(function (id) {
+      $(id).addEventListener('input', recalcQuick);
+    });
+    $('quickTicker').addEventListener('change', function () {
+      // 改了代號就把昨收重新帶一次，不然他會看到別檔的價格
+      var c = Store.closeOf(String(this.value || '').trim());
+      if (c) { $('quickPrice').value = c.price; recalcQuick(); }
+    });
+    $('quickSave').addEventListener('click', saveQuick);
+
+    $('inboxList').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-inbox-del]');
+      if (!b) return;
+      Store.removeFromInbox(b.dataset.inboxDel);
+      renderInbox();
+    });
+    $('inboxCopy').addEventListener('click', function () {
+      var t = inboxText();
+      if (!t) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(function () { flashCopyMsg('已複製'); },
+          function () { showCopyFallback(t); });
+      } else { showCopyFallback(t); }
+    });
     $('importReplace').addEventListener('click', runImportReplace);
 
     // 擋版的三顆鈕。它不是 .modal，所以 Esc 與點背景都關不掉它——這是刻意的。
@@ -2658,7 +2857,11 @@
     renderBackupBlocker();         // 要在資料載入與 render 之後才算得準
     // 昨收是加分項不是相依項：載入失敗（離線、檔案還沒產生、404）就當沒有這個功能，
     // 不跳錯也不影響任何既有畫面。所以放最後而且不擋啟動。
-    Store.loadCloses().then(function () { render(); });
+    // 名錄載入之後才處理 ?q=：第二層比對要靠它，提早跑會漏掉沒追蹤過的股票。
+    Store.loadCloses().then(function () {
+      render();
+      handleIncomingQuery();
+    });
     registerServiceWorker();
   }
 
