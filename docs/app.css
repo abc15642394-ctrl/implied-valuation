@@ -1591,6 +1591,36 @@ input[readonly], select:disabled {
   .sum-table td[data-col="note"] { width: 22%; }
 }
 
+/* 昨收帶入鍵。刻意只有一顆小圖示：實測隱含總表在 831px 下只剩 105px 餘裕，
+   而且那還是用短名稱的測試資料量的——放文字鍵會把表撐爆（build 14 的教訓）。
+   日期與數值都在 title 裡。 */
+.close-apply {
+  font: inherit;
+  font-size: .8rem;
+  line-height: 1;
+  padding: 1px 3px;
+  margin-left: 2px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--c-market);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.close-apply:hover { background: var(--surface); border-color: var(--c-market); }
+
+/* 日期只在這裡講一次——兩個交易所各一個日期，不是每一檔一個。 */
+.close-banner {
+  margin: 0 0 10px;
+  font-size: .82rem;
+  color: var(--muted);
+}
+
+.close-banner.stale { color: var(--warn); }
+
+.close-banner .pill { margin-left: 8px; }
+
 .fair-only { margin-top: 18px; border-left: 4px solid var(--c-mine); }
 .fair-only .sec-title { color: var(--text); font-size: .95rem; }
 

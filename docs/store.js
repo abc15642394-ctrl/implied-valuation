@@ -899,6 +899,46 @@
     return { ok: true, data: data };   // 回傳原始物件，交給 replacePreview／replaceAll
   }
 
+  // ---- 昨收（prices.json）----
+  //
+  // 由 GitHub Actions 每個交易日產生，格式 {"代號": ["名稱", 收盤價, "西元日期"]}。
+  // 兩個交易所的日期不一樣：TWSE 的 OpenAPI 結構上落後一個交易日（實測收盤後 9 小時
+  // 仍是前一天），TPEx 是當天。所以不能只講一個「昨收日期」。
+  //
+  // **抓不到就當沒有這個功能**：離線、檔案還沒產生、404 都一樣。這是加分項不是相依項，
+  // 任何失敗都不准影響既有功能。
+  var closes = null;
+
+  function loadCloses() {
+    return fetch('prices.json', { cache: 'no-cache' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        closes = (d && typeof d === 'object' && !Array.isArray(d)) ? d : null;
+        return closes;
+      })
+      .catch(function () { closes = null; return null; });
+  }
+
+  function closeOf(ticker) {
+    if (!closes) return null;
+    var row = closes[String(ticker || '').trim()];
+    if (!Array.isArray(row) || !(row[1] > 0)) return null;
+    return { name: row[0], price: row[1], date: row[2] };
+  }
+
+  function hasCloses() { return !!closes; }
+
+  // 橫幅要用的：每個交易所一個日期（不是每一檔一個），所以收集成一組。
+  function closeDates() {
+    if (!closes) return [];
+    var set = {};
+    Object.keys(closes).forEach(function (k) {
+      var d = closes[k] && closes[k][2];
+      if (d) set[d] = true;
+    });
+    return Object.keys(set).sort();
+  }
+
   function requestPersistence() {
     if (!navigator.storage || !navigator.storage.persist) return Promise.resolve(null);
     return navigator.storage.persisted()
@@ -962,6 +1002,10 @@
     fetchFromGist: fetchFromGist,
     markPushed: markPushed,
     daysSincePush: daysSincePush,
+    loadCloses: loadCloses,
+    closeOf: closeOf,
+    hasCloses: hasCloses,
+    closeDates: closeDates,
     requestPersistence: requestPersistence,
     canPersist: canPersist,
     daysSinceExport: daysSinceExport

@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 20;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 21;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -451,7 +451,30 @@
   function priceCell(stock, col, label, tone, placeholder) {
     return '<td class="num ' + (tone || '') + '" data-col="' + col + '" data-label="' + label + '">'
       + numInput('data-stock-id="' + esc(stock.id) + '" data-stock-field="currentPrice"',
-          stock.currentPrice, PRICE_HINT, placeholder) + '</td>';
+          stock.currentPrice, PRICE_HINT, placeholder)
+      // 只有隱含總表那兩張給帶入鍵。priceCell 有三個呼叫點，追蹤清單也是其中之一
+      // （它傳的 col 是 'price'），但主表的欄寬是另外調過的，不在這一包的範圍裡。
+      + (col === 'currentPrice' ? closeBtn(stock) : '') + '</td>';
+  }
+
+  // 昨收帶入鍵。只有一顆小圖示，不是文字鍵——實測隱含總表在 831px 下只剩 105px
+  // 餘裕（而且那是用短名稱的測試資料量的，真實資料更少），放文字鍵會把表撐爆。
+  // 日期與數值放 title，不逐列顯示。
+  function pendingClose(stock) {
+    if (!Store.canPush()) return null;          // 手機是唯讀副本，帶了也會被下次拉覆蓋
+    var c = Store.closeOf(stock.ticker);
+    if (!c) return null;
+    if (stock.currentPrice !== null && stock.currentPrice !== undefined
+        && Math.abs(stock.currentPrice - c.price) < 0.005) return null;   // 一樣就不用帶
+    return c;
+  }
+
+  function closeBtn(stock) {
+    var c = pendingClose(stock);
+    if (!c) return '';
+    return '<button type="button" class="close-apply" data-close-apply="' + esc(stock.id) + '"'
+      + ' title="' + esc(c.date + ' 收盤 ' + fmtNum(c.price) + '，點一下帶入現價') + '"'
+      + ' aria-label="帶入昨收 ' + esc(fmtNum(c.price)) + '">↓</button>';
   }
 
   function impliedHtml(c, eps, price, priceLabel) {
@@ -837,6 +860,48 @@
     if (!res.ok) { alert('取代失敗：' + res.error + '（本機資料沒有被動到）'); return; }
     afterDataSwap();
     alert('已取代成 ' + res.stocks + ' 檔 ' + res.records + ' 筆。到「同步」可以還原上一次取代。');
+  }
+
+  // ---- 昨收橫幅 ----
+  //
+  // 日期放這裡講一次就好：實測兩個來源各自只有一個日期（TWSE 全部同一天、
+  // TPEx 全部同一天），所以不需要逐列顯示——那會吃掉本來就不夠的表格寬度。
+  function renderCloseBanner() {
+    var el = $('closeBanner');
+    if (!el) return;
+    if (!Store.hasCloses() || Store.getState().stocks.length === 0) { el.hidden = true; return; }
+
+    var dates = Store.closeDates();
+    var pending = Store.getState().stocks.filter(function (s) { return !!pendingClose(s); });
+
+    // 連一檔都帶不動（手機、或全部都已經是最新）時，仍然顯示日期——
+    // 他要知道手上這些昨收是哪一天的，TWSE 本來就可能落後一個交易日。
+    var stale = dates.length && daysBetween(dates[0], Store.today()) > 5;
+    var txt = '收盤資料：' + dates.join('、');
+    if (pending.length) txt += '　' + pending.length + ' 檔可帶入';
+
+    el.innerHTML = esc(txt)
+      + (pending.length ? ' <button type="button" id="closeApplyAll" class="pill">全部帶入</button>' : '');
+    el.classList.toggle('stale', !!stale);
+    el.hidden = false;
+  }
+
+  function daysBetween(isoDate, today) {
+    var a = new Date(isoDate + 'T00:00:00').getTime();
+    var b = new Date(today + 'T00:00:00').getTime();
+    if (!isFinite(a) || !isFinite(b)) return 0;
+    return Math.round((b - a) / 86400000);
+  }
+
+  // 帶入只寫 stock.currentPrice。紀錄裡的「當時股價」是歷史快照，動了會讓
+  // 過去的估值失真，絕對不碰。
+  function applyClose(stockId) {
+    var stock = Store.findStock(stockId);
+    if (!stock) return false;
+    var c = Store.closeOf(stock.ticker);
+    if (!c) return false;
+    Store.updateStock(stock.id, { currentPrice: c.price });
+    return true;
   }
 
   function renderSettings() {
@@ -1286,6 +1351,7 @@
   }
 
   function renderSummary() {
+    renderCloseBanner();
     var all = summaryRows();
     var withPrice = all.filter(hasPrice);
     var noPrice = all.filter(function (r) { return !hasPrice(r); });
@@ -2174,6 +2240,21 @@
         if (aiTr) { toggleAiExpand(aiTr.dataset.sumStock); return; }
       }
 
+      // 昨收帶入。要整表重繪：帶了現價之後，那一列會從下半部「只算得出合理價」
+      // 跳到上半部的隱含總表，只刷一格會讓它留在錯的表裡。既有的 currentPrice
+      // 編輯分支也是這樣處理的。
+      var applyOne = e.target.closest('[data-close-apply]');
+      if (applyOne) {
+        if (applyClose(applyOne.dataset.closeApply)) render();
+        return;
+      }
+      if (e.target.id === 'closeApplyAll') {
+        var n = 0;
+        Store.getState().stocks.forEach(function (st) { if (applyClose(st.id)) n++; });
+        if (n) render();
+        return;
+      }
+
       // 點主表的列＝選取該檔（總表的列不帶 data-stock，所以不會誤觸）
       if (e.target.closest('input, textarea, button')) return;
       var tr = e.target.closest('#stockBody tr[data-stock]');
@@ -2575,6 +2656,9 @@
     try { saved = localStorage.getItem('iv-tab') || 'list'; } catch (e) {}
     setTab(saved);                 // setTab 內部會呼叫 render()
     renderBackupBlocker();         // 要在資料載入與 render 之後才算得準
+    // 昨收是加分項不是相依項：載入失敗（離線、檔案還沒產生、404）就當沒有這個功能，
+    // 不跳錯也不影響任何既有畫面。所以放最後而且不擋啟動。
+    Store.loadCloses().then(function () { render(); });
     registerServiceWorker();
   }
 

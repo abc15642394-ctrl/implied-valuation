@@ -1,0 +1,39 @@
+name: 每日收盤價
+
+# TWSE 的 OpenAPI 結構上落後一個交易日（實測：收盤後 9 小時仍是前一天的資料），
+# 所以一天跑一次就夠，深夜再跑一次拿到的是同一份。
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'      # UTC，即台北時間平日 18:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prices
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 腳本只用標準函式庫，不裝任何東西。
+      # 兩個來源都成功才會寫檔；任一失敗就整個 job 失敗，GitHub 會寄信，
+      # 而 docs/prices.json 維持上一版不動。
+      - name: 抓取並合併收盤價
+        run: python3 .github/scripts/build_prices.py
+
+      - name: 有變動才 commit
+        run: |
+          if git diff --quiet -- docs/prices.json; then
+            echo "內容沒變，不 commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/prices.json
+          git commit -m "收盤價：$(date -u '+%Y-%m-%d')"
+          git push
