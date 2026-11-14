@@ -1482,6 +1482,31 @@ input[readonly], select:disabled {
   resize: vertical;
 }
 
+/* repo secret 的名字要看得出是「要照抄的字串」，不是一般文字。 */
+.hint code {
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* 通知設定的訂閱資訊：等寬、可捲、不換行會更難看，所以讓它自己折行。 */
+#pushSubText { word-break: break-all; }
+#pushSubBox { margin-top: 12px; }
+
+/* #pushTag 是可點的，所以它是 <button> 而不是 span（游標、鍵盤焦點，而且手機上
+   看不到 title）。但全域 button 規則會給它品牌漸層背景、14px 的 padding 與
+   font-weight 500，而 .nudge **沒有設 background**，蓋不掉那個漸層——不重設的話
+   它會長成一顆藍紫色膠囊鈕，跟旁邊的標籤完全不像一家人。
+   不能只靠 .nudge.stale 剛好也設了 background：那是巧合，哪天不加 .stale 就露餡。
+   特異性：.nudge.stale（0-2-0）> button.nudge（0-1-1），所以變色狀態仍然蓋得過這裡。 */
+button.nudge {
+  background: none;
+  border: none;
+  font-weight: inherit;
+}
+
 /* AI 表 13 欄，比另外兩張都寬，1024px 就已經差 67px。「估值日期」在追蹤清單
    與隱含總表都看得到，而且它的輸入框在展開區裡，是這張表最適合讓位的一欄。 */
 @media (min-width: 831px) and (max-width: 1100px) {

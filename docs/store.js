@@ -752,27 +752,42 @@
     return true;
   }
 
-  // ---- 這台裝置自己的設定（gist id 與 token）----
+  // ---- 這台裝置自己的設定（gist id、token、通知）----
   //
   // 再說一次為什麼不放 state：推上 gist 推的是整個 state，token 在裡面就等於
   // 把它明文公開。這個 key 不同步、不匯出、也不被取代動到。
+  //
+  // 欄位清單只寫一次。先前讀與寫各自逐欄列舉，加一個欄位漏改其中一邊，結果會是
+  // 「存進去了，下一次 setDeviceConfig 把它無聲清掉」——這種錯最難查。
+  var DEVICE_FIELDS = ['gistId', 'token', 'vapidKey', 'pushEndpoint', 'pushCopiedAt'];
+
+  function emptyDevice() {
+    var o = {};
+    DEVICE_FIELDS.forEach(function (k) { o[k] = ''; });
+    return o;
+  }
+
   function deviceConfig() {
+    var out = emptyDevice();
     var raw;
-    try { raw = localStorage.getItem(DEVICE_KEY); } catch (e) { return { gistId: '', token: '' }; }
-    if (!raw) return { gistId: '', token: '' };
+    try { raw = localStorage.getItem(DEVICE_KEY); } catch (e) { return out; }
+    if (!raw) return out;
     try {
-      var d = JSON.parse(raw);
-      return {
-        gistId: typeof d.gistId === 'string' ? d.gistId.trim() : '',
-        token: typeof d.token === 'string' ? d.token.trim() : ''
-      };
-    } catch (e) { return { gistId: '', token: '' }; }
+      var d = JSON.parse(raw) || {};
+      DEVICE_FIELDS.forEach(function (k) {
+        if (typeof d[k] === 'string') out[k] = d[k].trim();
+      });
+    } catch (e) { /* 壞掉就全空，不要讓一個壞掉的 key 擋住整個 app */ }
+    return out;
   }
 
   function setDeviceConfig(patch) {
     var cur = deviceConfig();
-    if ('gistId' in patch) cur.gistId = String(patch.gistId || '').trim();
-    if ('token' in patch) cur.token = String(patch.token || '').trim();
+    DEVICE_FIELDS.forEach(function (k) {
+      if (!(k in patch)) return;
+      var v = patch[k];
+      cur[k] = String(v === null || v === undefined ? '' : v).trim();
+    });
     try { localStorage.setItem(DEVICE_KEY, JSON.stringify(cur)); } catch (e) {}
     return cur;
   }
@@ -1032,6 +1047,155 @@
     return list;
   }
 
+  // ---- 推播通知 ----
+  //
+  // 架構：手機訂閱 → app 把訂閱資訊顯示出來讓他貼進 GitHub 的 repo secret →
+  // Actions 每天收盤後用 VAPID 私鑰簽章送出。
+  //
+  // 為什麼不是原計畫寫的「訂閱資訊存進現有的 gist 讓 Actions 讀」：**手機沒有
+  // token，寫不進 gist**，而訂閱偏偏只能在手機上產生。那條路根本不通。
+  //
+  // VAPID 公鑰也存在 DEVICE_KEY。公鑰本身不是秘密（寫死在原始碼裡也無所謂），
+  // 但它必須跟 Actions 用的私鑰成對，由他自己貼比寫死好——換一組金鑰不必重新發版。
+  //
+  // Apple 的三條硬規則（實作必須遷就，不是可以選的）：
+  //   1. 只有「加到主畫面」的 app 能用。Safari 分頁裡連 Notification 都沒有。
+  //   2. 權限必須由使用者的點擊觸發，不能在背景自己跳。
+  //   3. 每一則推播都必須真的顯示通知，否則權限會被撤銷（見 sw.js）。
+
+  function pushSupported() {
+    return !!(navigator.serviceWorker && window.PushManager && window.Notification
+      && navigator.serviceWorker.register);
+  }
+
+  function pushPermission() {
+    if (!window.Notification) return 'unsupported';
+    return Notification.permission;
+  }
+
+  // base64url 的 VAPID 公鑰 → Uint8Array。
+  // 先自己驗長度與第一個 byte：P-256 的未壓縮公鑰固定 65 bytes 且開頭是 0x04。
+  // 不驗的話，貼錯一個字 subscribe() 只會丟一個完全看不出原因的 DOMException。
+  function vapidKeyBytes(base64) {
+    var s = String(base64 || '').trim();
+    if (!s) return null;
+    var pad = new Array((4 - s.length % 4) % 4 + 1).join('=');
+    var b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
+    var bin;
+    try { bin = atob(b64); } catch (e) { return null; }
+    if (bin.length !== 65 || bin.charCodeAt(0) !== 4) return null;
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  // 只留 Actions 真正需要的兩塊。expirationTime 之類的對它沒用，少貼一點少錯一點。
+  function subJson(sub) {
+    var j = sub.toJSON ? sub.toJSON() : sub;
+    return {
+      endpoint: j.endpoint,
+      keys: { p256dh: (j.keys || {}).p256dh, auth: (j.keys || {}).auth }
+    };
+  }
+
+  function currentPushSub() {
+    if (!pushSupported()) return Promise.resolve(null);
+    return navigator.serviceWorker.ready
+      .then(function (reg) { return reg.pushManager.getSubscription(); })
+      .catch(function () { return null; });
+  }
+
+  // 已經用「同一組」公鑰訂閱過時，subscribe() 依規格會回傳既有的訂閱；
+  // 換了公鑰則丟 InvalidStateError。所以不去碰 PushSubscription.options
+  // （Safari 上不一定有），直接讓它丟，丟了才退訂重訂。
+  function subscribeWith(reg, key) {
+    var opts = { userVisibleOnly: true, applicationServerKey: key };
+    return reg.pushManager.subscribe(opts).catch(function (err) {
+      if (!err || err.name !== 'InvalidStateError') throw err;
+      return reg.pushManager.getSubscription().then(function (old) {
+        return (old ? old.unsubscribe() : Promise.resolve()).then(function () {
+          return reg.pushManager.subscribe(opts);
+        });
+      });
+    });
+  }
+
+  // 呼叫端必須在 click handler 裡同步走到這裡，否則 iOS 不認這個手勢。
+  function enablePush() {
+    if (!pushSupported()) {
+      return Promise.resolve({ ok: false, error:
+        '這個環境沒有推播功能。iOS 只有「加到主畫面」的 app 才有，Safari 分頁沒有。' });
+    }
+    var key = vapidKeyBytes(deviceConfig().vapidKey);
+    if (!key) {
+      return Promise.resolve({ ok: false, error:
+        'VAPID 公鑰沒填，或格式不對（應該是 87 個字的英數字串，開頭通常是 B）。' });
+    }
+    return Notification.requestPermission().then(function (p) {
+      if (p !== 'granted') {
+        return { ok: false, error: p === 'denied'
+          ? '通知權限被拒絕了。瀏覽器不會再問第二次，要到 iOS 的「設定 → 通知 → 隱含估值」自己打開。'
+          : '沒有同意通知權限。' };
+      }
+      // 換公鑰時 subscribeWith 會退訂重訂，endpoint 會變成另一個。先記下舊的。
+      var prevEndpoint = deviceConfig().pushEndpoint;
+      return navigator.serviceWorker.ready.then(function (reg) {
+        return subscribeWith(reg, key);
+      }).then(function (sub) {
+        var j = subJson(sub);
+        // endpoint 記下來，之後才比對得出「訂閱換了但他還沒重新貼」。
+        var patch = { pushEndpoint: j.endpoint };
+        // **endpoint 換了就一定要清掉 pushCopiedAt。** 不清的話 pushState() 會算出
+        // 「存的 endpoint === 現在的 endpoint」而回傳 'on'，畫面說「訂閱資訊也複製
+        // 過了」——而 GitHub 上還是舊的 endpoint，他一則都收不到又看不到任何警告。
+        // 這正是這整套偵測要防的靜默失敗，差點被自己的重新訂閱路徑繞過去。
+        if (prevEndpoint && j.endpoint !== prevEndpoint) patch.pushCopiedAt = '';
+        setDeviceConfig(patch);
+        return { ok: true, sub: j };
+      });
+    }).catch(function (err) {
+      return { ok: false, error: '訂閱失敗：' + ((err && err.message) ? err.message : String(err)) };
+    });
+  }
+
+  function disablePush() {
+    return currentPushSub().then(function (sub) {
+      // 本機設定一律清掉，連退訂失敗也清——不然畫面會顯示「已開啟」卻早就收不到。
+      setDeviceConfig({ pushEndpoint: '', pushCopiedAt: '' });
+      if (!sub) return { ok: true };
+      return sub.unsubscribe().then(function () { return { ok: true }; },
+        function () { return { ok: true, warn: '退訂沒成功，但本機已經關掉了。' }; });
+    });
+  }
+
+  // 他按過「複製」就當成已經貼進 repo secret 了。這是個代理指標，不是事實——
+  // app 沒有辦法知道 GitHub 那邊的 secret 長什麼樣。它的用途只有一個：
+  // 之後偵測「endpoint 變了而他還沒重新貼」。
+  function markPushCopied() {
+    return currentPushSub().then(function (sub) {
+      var patch = { pushCopiedAt: nowIso() };
+      if (sub) patch.pushEndpoint = subJson(sub).endpoint;
+      setDeviceConfig(patch);
+      return true;
+    });
+  }
+
+  // 給 UI 用的狀態。重點是 'changed' 與 'lost' 這兩種：**訂閱過期是靜默的**，
+  // 他只會覺得「怎麼好久沒收到通知」。endpoint 跟他複製過的那一個不一樣，
+  // 是這件事唯一偵測得到的地方。
+  function pushState() {
+    if (!pushSupported()) return Promise.resolve({ kind: 'unsupported' });
+    var c = deviceConfig();
+    if (pushPermission() === 'denied') return Promise.resolve({ kind: 'denied' });
+    return currentPushSub().then(function (sub) {
+      if (!sub) return { kind: c.pushEndpoint ? 'lost' : 'off' };
+      var j = subJson(sub);
+      if (!c.pushCopiedAt) return { kind: 'uncopied', sub: j };
+      if (c.pushEndpoint && j.endpoint !== c.pushEndpoint) return { kind: 'changed', sub: j };
+      return { kind: 'on', sub: j };
+    });
+  }
+
   function requestPersistence() {
     if (!navigator.storage || !navigator.storage.persist) return Promise.resolve(null);
     return navigator.storage.persisted()
@@ -1095,6 +1259,14 @@
     fetchFromGist: fetchFromGist,
     markPushed: markPushed,
     daysSincePush: daysSincePush,
+    pushSupported: pushSupported,
+    pushPermission: pushPermission,
+    pushState: pushState,
+    enablePush: enablePush,
+    disablePush: disablePush,
+    markPushCopied: markPushCopied,
+    currentPushSub: currentPushSub,
+    subJson: subJson,
     loadCloses: loadCloses,
     closeOf: closeOf,
     hasCloses: hasCloses,

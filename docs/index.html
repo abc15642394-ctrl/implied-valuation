@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隱含估值追蹤</title>
-<meta name="app-build" content="22">
+<meta name="app-build" content="23">
 <meta name="theme-color" content="#18202e">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -30,6 +30,10 @@
   <div class="topbar-actions">
     <span id="envTag" class="env-tag" hidden></span>
     <span id="freshTag" class="nudge" hidden></span>
+    <!-- 這一格是可以點的（點了開啟通知設定），所以必須是 button 不是 span：
+         手機沒有 hover，title 看不到，而旁邊兩個同款 span 都不可點，
+         做成 span 的話他不會知道這個能點。 -->
+    <button type="button" id="pushTag" class="nudge" hidden></button>
     <span id="exportNudge" class="nudge" hidden></span>
     <button type="button" id="syncBtn" class="ghost">同步</button>
     <button type="button" id="exportBtn" class="ghost">匯出</button>
@@ -485,6 +489,42 @@
       <button type="button" id="syncPush" class="primary">推上 gist（把這台的資料變成最新）</button>
       <button type="button" id="syncPull">拉最新（整個覆蓋這台）</button>
       <button type="button" id="syncUndo" class="ghost" hidden>還原上一次取代</button>
+      <button type="button" id="pushOpen" class="ghost">收盤通知設定</button>
+      <button type="button" class="ghost" data-close-modal>關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- 收盤通知。獨立一個彈窗：同步視窗已經很滿，而這是一次性設定。 -->
+<div id="pushModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>收盤通知</h2>
+    <p class="hint">
+      收盤後只在<strong>兩種情況</strong>推給你：落差跨過 ±5pp 的門檻，
+      或是電腦太久沒把資料推上 gist。沒事就不會響。
+    </p>
+    <p class="hint">
+      <strong>只有「加到主畫面」的 app 收得到</strong>，Safari 分頁沒有這個功能，這是 Apple 的限制。
+      公鑰與訂閱資訊只存在這台裝置，不會被推上 gist。
+    </p>
+    <label>VAPID 公鑰
+      <input type="text" id="pushVapid" placeholder="npx web-push generate-vapid-keys 產生的 Public Key"
+        autocomplete="off" spellcheck="false">
+    </label>
+    <p id="pushMsg" class="hint"></p>
+    <div class="modal-actions column">
+      <button type="button" id="pushEnable" class="primary">開啟通知</button>
+      <button type="button" id="pushDisable" class="ghost" hidden>關掉通知</button>
+    </div>
+    <div id="pushSubBox" hidden>
+      <p class="hint">把下面整段貼進 GitHub 的 repo secret <code>PUSH_SUB</code>。
+        這一步沒做完，Actions 不知道要推給誰。</p>
+      <textarea id="pushSubText" class="copy-text" readonly rows="5"></textarea>
+      <div class="modal-actions">
+        <button type="button" id="pushCopy" class="pill">複製訂閱資訊</button>
+      </div>
+    </div>
+    <div class="modal-actions">
       <button type="button" class="ghost" data-close-modal>關閉</button>
     </div>
   </div>

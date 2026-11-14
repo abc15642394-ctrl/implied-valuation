@@ -1,0 +1,8 @@
+{
+  "name": "implied-valuation-scripts",
+  "private": true,
+  "description": "只給 .github/scripts 的通知腳本用。網站本身是 vanilla JS、沒有建置步驟，docs/ 底下不依賴這裡的任何東西。",
+  "dependencies": {
+    "web-push": "3.6.7"
+  }
+}

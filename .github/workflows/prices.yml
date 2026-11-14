@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: '0 10 * * 1-5'      # UTC，即台北時間平日 18:00
   workflow_dispatch:
+    inputs:
+      test_push:
+        description: '送一則測試通知（不管有沒有跨門檻）'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -18,6 +23,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # depth 1 就夠：下面只用 `git show HEAD:`，那只讀目前 commit 的樹。
       - uses: actions/checkout@v4
 
       # 腳本只用標準函式庫，不裝任何東西。
@@ -25,6 +31,13 @@ jobs:
       # 而 docs/prices.json 維持上一版不動。
       - name: 抓取並合併收盤價
         run: python3 .github/scripts/build_prices.py
+
+      # 通知要比較「前一次收盤 → 這一次收盤」才知道落差有沒有跨過門檻。
+      # 上一步已經覆寫了工作目錄裡的 prices.json，所以**舊的那一份要在 commit 之前
+      # 從 HEAD 撈出來**。第一次跑（HEAD 裡還沒有這個檔）就當成空的，
+      # decide() 會因為找不到前一次收盤而全部跳過，不會誤推。
+      - name: 留下上一版收盤價給通知比較
+        run: git show HEAD:docs/prices.json > /tmp/prev.json || echo '{}' > /tmp/prev.json
 
       - name: 有變動才 commit
         run: |
@@ -37,3 +50,35 @@ jobs:
           git add docs/prices.json
           git commit -m "收盤價：$(date -u '+%Y-%m-%d')"
           git push
+
+      # 通知刻意排在 commit 之後：收盤價是比通知重要的產出，
+      # 通知掛掉不能擋住它落地。
+      #
+      # 沒設 secret 就安靜跳過（exit 0），不會讓這個 job 失敗——
+      # 他還沒做完設定的那幾天，收盤價照樣要正常更新。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 走 npm ci 而不是 npm install：版本與 integrity 都鎖在 package-lock.json 裡，
+      # CI 不會自己跳版。web-push 鎖 3.6.7（2024-01 的穩定版）——
+      # **不要升 4.0.0**，那是 2026-11-06 才發的大版號，一週大的 major 不值得賭。
+      - name: 安裝 web-push
+        run: npm ci --no-fund --no-audit
+
+      - name: 送收盤通知
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          PUSH_SUB: ${{ secrets.PUSH_SUB }}
+          FORCE_TEST: ${{ inputs.test_push }}
+        run: node .github/scripts/notify.mjs --new docs/prices.json --old /tmp/prev.json
+
+      # 純函式的測試，不碰網路也不碰 secret。放在最後：它擋不住今天的收盤價，
+      # 但一旦有人改壞了判斷邏輯（例如把「未估」當成 0%），這裡會紅。
+      - name: 跑通知邏輯的測試
+        run: |
+          node .github/scripts/test_notify.mjs
+          node .github/scripts/test_store.mjs

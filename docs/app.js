@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 22;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 23;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -814,6 +814,111 @@
       if (!res.ok) { syncMsg('取代失敗：' + res.error + '（本機資料沒有被動到）', true); return; }
       afterDataSwap();
       syncMsg('已更新成 ' + res.stocks + ' 檔 ' + res.records + ' 筆。按「還原上一次取代」可以救回來。');
+    });
+  }
+
+  // ---- 收盤通知 ----
+  //
+  // 推播的發送端是 GitHub Actions，不是這個網頁。這一段只負責三件事：
+  // 拿到訂閱、把訂閱資訊給他複製去貼進 repo secret、以及**偵測訂閱悄悄失效**。
+  //
+  // 第三件最容易漏掉，但它是這個功能唯一的失敗模式：訂閱過期不會有任何提示，
+  // 他只會覺得「怎麼好久沒通知」——而那跟「最近真的沒事發生」長得一模一樣。
+  // 所以 endpoint 一旦跟他複製過的那一個不同（或訂閱整個不見了），topbar 要標出來。
+
+  function pushMsg(text, bad) {
+    var el = $('pushMsg');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('error-text', !!bad);
+  }
+
+  // 只列「出問題」的狀態。正常、沒開、環境不支援都不佔版面——topbar 在 375px 下
+  // 已經很滿了，平常沒事還擠一格進去，真的有事的時候反而看不出來。
+  var PUSH_TAG = {
+    lost: { text: '通知失效了',
+            why: '推播訂閱已經不存在了（過期或被系統清掉）。打開「收盤通知設定」重新按一次「開啟通知」。' },
+    changed: { text: '通知要重新貼',
+            why: '這台裝置的訂閱換了新的 endpoint，你貼在 GitHub 的那份已經失效。打開「收盤通知設定」重新複製。' },
+    uncopied: { text: '通知還沒貼上去',
+            why: '已經訂閱，但訂閱資訊還沒貼進 GitHub 的 repo secret，所以一則都不會收到。' }
+  };
+
+  // 刻意不放進 render()：pushState() 要等 serviceWorker.ready 再查一次訂閱，
+  // 而 render() 一次操作可能跑好幾遍。只在啟動與通知相關動作之後呼叫。
+  function renderPushTag() {
+    var el = $('pushTag');
+    if (!el) return;
+    if (!Store.pushSupported()) { el.hidden = true; return; }
+    Store.pushState().then(function (s) {
+      var t = PUSH_TAG[s.kind];
+      if (!t) { el.hidden = true; return; }
+      el.textContent = t.text;
+      el.title = t.why;
+      el.classList.add('stale');
+      el.hidden = false;
+    });
+  }
+
+  function showPushSub(sub) {
+    if (!sub) return;
+    // 單行 JSON：要貼進 GitHub 的 secret 欄位，多餘的換行只會變成貼錯的機會。
+    $('pushSubText').value = JSON.stringify(sub);
+    $('pushSubBox').hidden = false;
+  }
+
+  function openPush() {
+    closeAllModals();                      // 兩層 .modal 疊著會分不清在操作哪一個
+    $('pushVapid').value = Store.deviceConfig().vapidKey;
+    refreshPushUi();
+    $('pushModal').hidden = false;
+  }
+
+  // 回傳一個 promise，在狀態訊息真的寫上畫面之後才 resolve。呼叫端有人要等它
+  // （見 pushCopy 的 finish），所以這個回傳值是契約的一部分，不要改掉。
+  function refreshPushUi() {
+    $('pushSubBox').hidden = true;
+    $('pushDisable').hidden = true;
+    $('pushEnable').textContent = '開啟通知';
+    $('pushEnable').disabled = false;
+
+    if (!Store.pushSupported()) {
+      $('pushEnable').disabled = true;
+      pushMsg('這個環境沒有推播功能：你現在在「' + runtimeLabel() + '」。'
+        + 'iOS 要先把網站加到主畫面，再從主畫面那個 app 打開才會有。', true);
+      return Promise.resolve();
+    }
+
+    // 兩個 return 都是必要的：呼叫端（pushCopy 的 finish）要等這支把訊息設完，
+    // 才能把自己的 fallback 訊息蓋上去。裸 return 回的是 undefined，
+    // 對它呼叫 .then() 會直接丟 TypeError。
+    return Store.pushState().then(function (s) {
+      if (s.kind === 'denied') {
+        $('pushEnable').disabled = true;
+        pushMsg('通知權限已經被拒絕過，瀏覽器不會再問第二次。'
+          + '要到 iOS 的「設定 → 通知 → 隱含估值」把它打開，再回來按一次。', true);
+        return;
+      }
+      if (s.kind === 'off') {
+        pushMsg('還沒開啟。填好 VAPID 公鑰之後按「開啟通知」。');
+        return;
+      }
+      if (s.kind === 'lost') {
+        pushMsg('訂閱已經不存在了（過期或被系統清掉）。按「開啟通知」重新訂閱，'
+          + '然後務必把新的訂閱資訊重新貼到 GitHub——endpoint 會換，舊的那份沒用了。', true);
+        return;
+      }
+
+      $('pushEnable').textContent = '重新訂閱';
+      $('pushDisable').hidden = false;
+      showPushSub(s.sub);
+      if (s.kind === 'changed') {
+        pushMsg('訂閱換了新的 endpoint，你貼在 GitHub 的那份已經失效。複製下面這段重新貼一次。', true);
+      } else if (s.kind === 'uncopied') {
+        pushMsg('訂閱好了，但還沒貼進 GitHub——現在一則都不會收到。複製下面這段。', true);
+      } else {
+        pushMsg('通知已開啟，訂閱資訊也複製過了。');
+      }
     });
   }
 
@@ -2624,6 +2729,71 @@
       else { syncMsg('沒有可還原的快照。', true); }
     });
 
+    // 收盤通知。入口有兩個：同步視窗裡的按鈕，以及 topbar 上「出問題了」的標籤。
+    $('pushOpen').addEventListener('click', openPush);
+    $('pushTag').addEventListener('click', openPush);
+    $('pushVapid').addEventListener('change', function () {
+      Store.setDeviceConfig({ vapidKey: this.value });
+    });
+
+    $('pushEnable').addEventListener('click', function () {
+      // iOS 要求通知權限必須由使用者的手勢觸發。所以存公鑰與呼叫 enablePush()
+      // 都得在這個 handler 裡**同步**走完，中間不能先 await 任何東西——
+      // 一旦跨過一個 await，那個手勢就不算了，而失敗長得像「按了沒反應」。
+      Store.setDeviceConfig({ vapidKey: $('pushVapid').value });
+      pushMsg('正在要通知權限…');
+      Store.enablePush().then(function (r) {
+        // 成功時不自己寫訊息：refreshPushUi() 會依狀態講對的話
+        // （還沒貼進 GitHub 就會催他貼），兩邊各寫一份遲早會講得不一樣。
+        if (!r.ok) { pushMsg(r.error, true); } else { refreshPushUi(); }
+        renderPushTag();
+      });
+    });
+
+    $('pushCopy').addEventListener('click', function () {
+      var t = $('pushSubText').value;
+      if (!t) return;
+      // 「按過複製鍵」就算貼過了。這是代理指標不是事實——app 看不到 GitHub 那邊的
+      // secret。它唯一的用途是之後偵測「endpoint 換了而他還沒重新貼」。
+      // 剪貼簿 API 失敗也要記：按鈕按下去才是訊號，不然他手動複製完還會被一直催。
+      // refreshPushUi() 是**非同步**設訊息的（它在 pushState().then() 裡）。
+      // 先前這裡是「呼叫 refreshPushUi() 然後同步設 fallback」——微任務一定排在
+      // 同步碼之後，所以 fallback 那句會立刻被蓋掉。結果是剪貼簿被擋的時候，
+      // 他看到的是「通知已開啟，訂閱資訊也複製過了」，完全沒有「自己按複製」
+      // 這個指示。所以必須串起來等它設完，fallback 才有機會留在畫面上。
+      function finish(fallbackText) {
+        Store.markPushCopied().then(function () {
+          renderPushTag();
+          return refreshPushUi();
+        }).then(function () {
+          if (fallbackText) pushMsg(fallbackText, true);
+        });
+      }
+      var manual = function (why) {
+        $('pushSubText').focus();
+        $('pushSubText').select();
+        finish(why + '下面的文字已經全選，自己按複製。');
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(function () { finish(''); },
+          function () { manual('瀏覽器擋下了剪貼簿。'); });
+      } else {
+        manual('這個瀏覽器沒有剪貼簿 API。');
+      }
+    });
+
+    $('pushDisable').addEventListener('click', function () {
+      // GitHub 那邊的 secret 不刪的話，Actions 每天會推給一個已經失效的訂閱、
+      // 拿到 410 Gone、整個 job 失敗，然後他每天收到一封錯誤信。要先講。
+      if (!confirm('關掉這台裝置的收盤通知？\n\n'
+          + 'GitHub 上的 PUSH_SUB secret 要自己去刪掉，否則 Actions 每天還是會試著推給'
+          + '一個已經失效的訂閱，然後失敗、寄錯誤信給你。')) return;
+      Store.disablePush().then(function () {
+        refreshPushUi();
+        renderPushTag();
+      });
+    });
+
     $('importMerge').addEventListener('click', runImportMerge);
 
     // LINE 直達的兩個彈窗
@@ -2847,6 +3017,7 @@
     renderSettings();
     renderEnvTag();
     renderFreshTag();
+    renderPushTag();          // 只查一次：它要等 serviceWorker.ready，不放進 render()
     $('calcG610').value = settings().defaultCagr6_10;   // 只在載入時種一次
     $('newDate').value = Store.today();
     bind();
