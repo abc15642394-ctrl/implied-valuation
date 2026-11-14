@@ -5,13 +5,12 @@
 // 只測 notify.mjs 的純函式（decide 與它的零件）。那些函式刻意不碰網路、不碰
 // secret、不印東西，所以這裡餵假資料就能把判斷邏輯全部走一遍。
 
-import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   decide, loadValuation, loadThresholds, latestRecord, gapAt,
-  readSettings, staleDue, daysSince, STALE_PUSH_DAYS
+  readSettings, staleDue, daysSince, parseGistState, STALE_PUSH_DAYS
 } from './notify.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -133,7 +132,25 @@ function makeState({ ticker = '2330', eps = 10, my = 15, lastPushAt = null } = {
     aiDraft: {}, lastExportAt: null, lastPushAt
   };
 }
-const prices = (ticker, p, date = '2026-11-13') => ({ [ticker]: ['測試檔', p, date] });
+// 兩個交易所的日期不一樣（TWSE 結構性落後一個交易日，第三包實測過），所以這支
+// 必須能一次塞多檔、每一檔帶自己的日期。
+//
+// **先前它只吃一檔、日期還是帶預設值的參數**，而全檔每一處都用那個預設值——
+// 結果「通知內文把一檔的收盤日套用到全部」那個 bug 在結構上不可能被測到。
+// 光加斷言沒有用，因為 fixture 本身只有一個日期。這是改成 rows 的唯一理由。
+//
+//     prices(['2330', 100])                       → 一檔，日期用預設
+//     prices(['1111', 100, '2026-11-12'],         → 兩檔，分屬兩個交易所的日期
+//            ['6666', 200, '2026-11-13'])
+const prices = (...rows) => {
+  const out = {};
+  for (const [ticker, p, date, name] of rows) {
+    // 名稱可以指定：decide() 用的是 prices 裡的名稱（`now_.name || st.name`），
+    // 而名稱長度直接決定內文長度，三檔列舉那條路徑要用長名稱才測得到最壞情況。
+    out[ticker] = [name || '測試檔', p, date || '2026-11-13'];
+  }
+  return out;
+};
 
 // 找出讓落差落在某一帶的現價：合理價附近落差≈0（mid），價格拉高落差變大（bad），
 // 壓低則落差變負（good）。
@@ -158,7 +175,7 @@ function testDecideCrossing() {
 
   const run = (oldP, newP, extra = {}) => decide({
     V, th: TH, state: makeState(extra),
-    oldPrices: prices('2330', oldP), newPrices: prices('2330', newP),
+    oldPrices: prices(['2330', oldP]), newPrices: prices(['2330', newP]),
     now: Date.parse('2026-11-14T12:00:00Z'), forceTest: false
   });
 
@@ -179,8 +196,8 @@ function testDecideCrossing() {
 function testDecideSkips() {
   const run = (state, oldP, newP) => decide({
     V, th: TH, state,
-    oldPrices: oldP === null ? {} : prices('2330', oldP),
-    newPrices: newP === null ? {} : prices('2330', newP),
+    oldPrices: oldP === null ? {} : prices(['2330', oldP]),
+    newPrices: newP === null ? {} : prices(['2330', newP]),
     now: Date.parse('2026-11-14T12:00:00Z'), forceTest: false
   });
   const mid = FAIR_15;
@@ -211,7 +228,7 @@ function testDecideStaleAndTest() {
   const iso = (d) => new Date(Date.parse('2026-11-14T12:00:00Z') - d * 86400000).toISOString();
   const run = (days, forceTest = false) => decide({
     V, th: TH, state: makeState({ lastPushAt: days === null ? null : iso(days) }),
-    oldPrices: prices('2330', FAIR_15), newPrices: prices('2330', FAIR_15),
+    oldPrices: prices(['2330', FAIR_15]), newPrices: prices(['2330', FAIR_15]),
     now: Date.parse('2026-11-14T12:00:00Z'), forceTest
   });
 
@@ -225,7 +242,7 @@ function testDecideStaleAndTest() {
   // 兩種提醒的 tag 必須不同，否則後到的會把前一則擠掉
   const both = decide({
     V, th: TH, state: makeState({ lastPushAt: iso(7) }),
-    oldPrices: prices('2330', FAIR_15), newPrices: prices('2330', FAIR_15 * 3),
+    oldPrices: prices(['2330', FAIR_15]), newPrices: prices(['2330', FAIR_15 * 3]),
     now: Date.parse('2026-11-14T12:00:00Z'), forceTest: true
   });
   const tags = both.map((m) => m.tag);
@@ -245,6 +262,133 @@ function testDecideStaleAndTest() {
   }
 }
 
+// ---- 5b. 通知內文：日期、單檔文案、長度 ----
+//
+// 這一組全部是「上線之後逐字讀回才發現」的問題。共同的根因是測試的 fixture
+// 只有一個日期、而且只測單檔，所以結構上看不到這些路徑。
+
+// 兩檔分屬不同交易所日期的狀態。不能重用 makeState（它只放一檔）。
+function twoStockState() {
+  return {
+    schemaVersion: 2,
+    settings: { discountRate: 10, perpetualGrowth: 2, defaultCagr6_10: 5 },
+    stocks: [
+      { id: 'a', ticker: '1111', name: '上市股', market: 'TW' },
+      { id: 'b', ticker: '6666', name: '上櫃股', market: 'TW' }
+    ],
+    records: [
+      { id: 'ra', stockId: 'a', date: '2026-11-01', createdAt: '2026-11-01T00:00:00Z',
+        eps: 10, myCagr1_5: 15, cagr6_10: 5 },
+      { id: 'rb', stockId: 'b', date: '2026-11-01', createdAt: '2026-11-01T00:00:00Z',
+        eps: 10, myCagr1_5: 15, cagr6_10: 5 }
+    ],
+    aiDraft: {}, lastExportAt: null, lastPushAt: null
+  };
+}
+
+function testBodyDatesAndWording() {
+  const mid = FAIR_15;
+  const run = (state, oldP, newP) => decide({
+    V, th: TH, state, oldPrices: oldP, newPrices: newP,
+    now: Date.parse('2026-11-14T12:00:00Z'), forceTest: false
+  }).find((m) => m.kind === 'gap');
+
+  // ① 兩檔分屬 11-12 與 11-13（實際的 prices.json 就是這樣：1378 檔 11-12、997 檔 11-13）。
+  //    內文只寫一個日期的話，另一檔的日期就是錯的。
+  const two = run(twoStockState(),
+    prices(['1111', mid, '2026-11-11', '上市股'], ['6666', mid, '2026-11-12', '上櫃股']),
+    prices(['1111', mid * 3, '2026-11-12', '上市股'], ['6666', mid * 3, '2026-11-13', '上櫃股']));
+  ok('兩檔都跨了門檻', two && two.title.includes('2 檔'), two && two.title);
+  ok('內文寫出 2026-11-12', two.body.includes('2026-11-12'), two.body);
+  ok('內文也寫出 2026-11-13（不能只拿其中一檔的日期套用到全部）',
+    two.body.includes('2026-11-13'), two.body);
+
+  // 只有一個日期時不要變成「2026-11-13、2026-11-13」
+  const same = run(twoStockState(),
+    prices(['1111', mid, '2026-11-13'], ['6666', mid, '2026-11-13']),
+    prices(['1111', mid * 3, '2026-11-13'], ['6666', mid * 3, '2026-11-13']));
+  eq('同一個日期只出現一次',
+    (same.body.match(/2026-11-13/g) || []).length, 1);
+
+  // ⑤ 單檔時標題已經寫了名稱與分帶，內文不該再重複一次。
+  const single = decide({
+    V, th: TH, state: makeState(),
+    oldPrices: prices(['2330', mid]), newPrices: prices(['2330', mid * 0.35]),
+    now: Date.parse('2026-11-14T12:00:00Z'), forceTest: false
+  }).find((m) => m.kind === 'gap');
+  ok('單檔標題有名稱與分帶', single.title.includes('測試檔') && single.title.includes('低估'),
+    single.title);
+  ok('單檔內文不重複名稱', !single.body.includes('測試檔'), single.body);
+  ok('單檔內文不重複分帶名', !single.body.includes('低估'), single.body);
+  ok('單檔內文仍然有落差數字', /-?\d+\.\d+pp/.test(single.body), single.body);
+
+  // ⑩ 列舉是最長的那條路徑，先前完全沒測過長度。
+  //
+  // 必須測到**五檔**，不是三檔：MAX_LISTED 是 3，三檔的時候「列 3」與「列全部」
+  // 長度一樣，所以把 MAX_LISTED 改大也測不出來（突變測試抓到的）。
+  // 五檔時正確行為是「列 3 檔 ＋ 等 5 檔」；若有人把 MAX_LISTED 拿掉，
+  // 五個長名稱全列出來就會衝破 120。
+  const LONG = ['台灣積體電路製造', '環球晶圓', '世界先進積體電路', '南亞科技', '力積電子製造服務'];
+  const manyState = (k) => ({
+    schemaVersion: 2,
+    settings: { discountRate: 10, perpetualGrowth: 2, defaultCagr6_10: 5 },
+    stocks: LONG.slice(0, k).map((nm, i) => ({ id: 's' + i, ticker: '100' + i, name: nm, market: 'TW' })),
+    records: LONG.slice(0, k).map((_, i) => ({ id: 'r' + i, stockId: 's' + i,
+      date: '2026-11-01', createdAt: '2026-11-01T00:00:00Z',
+      eps: 10, myCagr1_5: 15, cagr6_10: 5 })),
+    aiDraft: {}, lastExportAt: null, lastPushAt: null
+  });
+  // 刻意讓兩個交易所的日期都出現
+  const manyPrices = (k, p) => prices(...LONG.slice(0, k).map((nm, i) =>
+    ['100' + i, p, i % 2 ? '2026-11-13' : '2026-11-12', nm]));
+
+  for (const k of [1, 2, 3, 4, 5]) {
+    const m = run(manyState(k), manyPrices(k, mid), manyPrices(k, mid * 3));
+    ok(`${k} 檔時內文不超過 120 字（鎖定畫面會截斷）`, m.body.length <= 120,
+      `${m.body.length} 字：${m.body}`);
+  }
+
+  const m5 = run(manyState(5), manyPrices(5, mid), manyPrices(5, mid * 3));
+  ok('五檔時只列前 3 檔，其餘收成「等 5 檔」',
+    m5.body.includes('等 5 檔') && m5.body.split('轉為').length - 1 === 3, m5.body);
+  ok('五檔時兩個交易所的日期都在', m5.body.includes('2026-11-12') && m5.body.includes('2026-11-13'),
+    m5.body);
+}
+
+// ---- 5c. gist 內容解析：錯誤訊息絕對不能夾帶他的資料 ----
+//
+// V8 的 JSON 錯誤訊息會夾帶輸入的前 10 個字，而 Actions 的 log 是公開的。
+// 這一組是行為測試（不是結構檢查）：直接拿會洩漏的輸入餵進去，斷言丟出來的
+// 訊息裡找不到那些字。
+function testGistParseNoLeak() {
+  // 刻意長得像他真實資料的假內容
+  const secret = '台積電 2330 我估 18.5% 這是我的筆記';
+  const cases = [
+    ['完全不是 JSON', secret],
+    ['被截斷的 JSON', '{"schemaVersion":2,"stocks":[{"ticker":"2330","name":"台積電"'],
+    ['GitHub 回了 HTML', '<html><body>Not Found</body></html>'],
+    ['空字串', ''],
+    ['是陣列不是物件', '[1,2,3]'],
+    ['null', 'null'],
+    ['schemaVersion 不是 2', '{"schemaVersion":1,"stocks":[]}']
+  ];
+  const leaky = ['台積電', '2330', '18.5', '筆記', 'ticker', 'stocks', 'Not Found'];
+
+  for (const [name, text] of cases) {
+    let msg = null;
+    try { parseGistState(text); } catch (e) { msg = e.message; }
+    ok(`${name} → 會丟錯`, msg !== null, '居然沒丟錯');
+    if (msg === null) continue;
+    const found = leaky.filter((x) => msg.includes(x));
+    ok(`${name} → 訊息不夾帶內容`, found.length === 0,
+      `訊息「${msg}」夾帶了 ${found.join('、')}`);
+  }
+
+  // 合法的要過
+  const good = parseGistState('{"schemaVersion":2,"stocks":[],"records":[]}');
+  eq('合法的 v2 state 解得出來', good.schemaVersion, 2);
+}
+
 // ---- 6. 公開 log 的紀律 ----
 //
 // 這個 repo 是公開的，workflow 的 log 任何人都看得到，而通知內容就是他的估值。
@@ -256,9 +400,17 @@ function testNoLeakyLogs() {
   const calls = [...src.matchAll(/console\.log\(([\s\S]*?)\);\n/g)].map((m) => m[1]);
   ok('有找到 console.log 來檢查', calls.length > 0);
 
-  // 這些識別字一旦出現在 log 的參數裡，就等於把他的估值印進公開 log
+  // 這些識別字一旦出現在 log 的參數裡，就等於把他的估值印進公開 log。
+  //
+  // `.message` 是後來補的，而它正是 ② 當初逃掉的原因：先前只有一條
+  // 「最外層 catch 不印 err.message」的正則，**漏掉了內層的 e2.message**。
+  // 實測 V8 的 JSON 錯誤訊息會夾帶輸入的前 10 個字
+  // （`Unexpected token '台', "台積電 2330 我"... is not valid JSON`），
+  // 所以任何 `.message` 進到 log 就是一條洩漏管道。自己寫的固定字串不受影響
+  // ——那些是模板字面，不含 `.message`。
   const banned = ['m.title', 'm.body', 'c.name', 'st.ticker', 'c.ticker', 'c.gap',
-    '.endpoint', 'payload', 'JSON.stringify(m', 'env.GIST_ID', 'env.PUSH_SUB'];
+    '.endpoint', 'payload', 'JSON.stringify(m', 'env.GIST_ID', 'env.PUSH_SUB',
+    '.message'];
   for (const c of calls) {
     for (const b of banned) {
       ok(`log 裡沒有 ${b}`, !c.includes(b), `出現在：${c.slice(0, 70)}`);
@@ -318,6 +470,8 @@ const run = async () => {
   testDecideCrossing();
   testDecideSkips();
   testDecideStaleAndTest();
+  testBodyDatesAndWording();
+  testGistParseNoLeak();
   testNoLeakyLogs();
   await testMissingSecretsExitZero();
 

@@ -197,18 +197,38 @@ export function decide({ V, th, state, oldPrices, newPrices, now, forceTest }) {
   if (crossed.length) {
     // 最戲劇性的排前面：跨到 good／bad 的比跨回 mid 的值得先看。
     crossed.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
-    const listed = crossed.slice(0, MAX_LISTED).map((c) =>
-      `${c.name} 轉為${BAND_NAME[c.to]} ${c.gap > 0 ? '+' : ''}${c.gap.toFixed(1)}pp`);
-    const rest = crossed.length - listed.length;
     const one = crossed[0];
+    const pp = (g) => `${g > 0 ? '+' : ''}${g.toFixed(1)}pp`;
+
+    // **日期要列出全部不重複的，不能拿其中一檔的套用到所有檔。**
+    // 兩個交易所的日期不一樣（TWSE 結構性落後一個交易日，第三包實測過；
+    // 現在的 prices.json 就是 1378 檔 11-12 ＋ 997 檔 11-13）。
+    // 先前這裡寫 `crossed[0].date`，而 crossed 剛剛才按 |gap| 排過序——
+    // 等於隨便挑一檔的日期去標註另一個交易所的股票，那個日期是錯的。
+    // app 的橫幅 renderCloseBanner() 本來就是列出全部日期（Store.closeDates()），
+    // 這裡照同一個做法。
+    const dates = [...new Set(crossed.map((c) => c.date).filter(Boolean))].sort();
+    const dateNote = dates.length ? `（依 ${dates.join('、')} 收盤）` : '';
+
+    let body;
+    if (crossed.length === 1) {
+      // 標題已經寫了名稱與分帶，內文再寫一次是廢話。改成給他標題沒有的資訊：
+      // 落差數字與這一天的價格變化。
+      body = `${pp(one.gap)}，${one.prevPrice} → ${one.price}${dateNote}`;
+    } else {
+      const listed = crossed.slice(0, MAX_LISTED).map((c) =>
+        `${c.name} 轉為${BAND_NAME[c.to]} ${pp(c.gap)}`);
+      const rest = crossed.length - listed.length;
+      body = listed.join('、') + (rest > 0 ? `，等 ${crossed.length} 檔` : '') + dateNote;
+    }
+
     out.push({
       kind: 'gap',
       tag: 'iv-gap',
       title: crossed.length === 1
         ? `${one.name} 落差轉為${BAND_NAME[one.to]}`
         : `${crossed.length} 檔的落差換了帶`,
-      body: listed.join('、') + (rest > 0 ? `，等 ${crossed.length} 檔` : '')
-        + `（依 ${one.date} 收盤）`
+      body: body
     });
   }
 
@@ -267,9 +287,34 @@ async function fetchGist(gistId) {
     if (!r2.ok) throw new Error(`抓 gist 內容回應 ${r2.status}`);
     text = await r2.text();
   }
-  const state = JSON.parse(text);
+  return parseGistState(text);
+}
+
+/**
+ * 把 gist 的內容字串轉成 state。錯誤訊息**全部由這裡控制**。
+ *
+ * 為什麼要單獨一支：`JSON.parse` 的錯誤訊息會夾帶輸入的前 10 個字。實測 V8 給的是
+ *
+ *     Unexpected token '台', "台積電 2330 我"... is not valid JSON
+ *
+ * 而 Actions 的 log 是公開的——一旦哪天 gist 內容不是合法 JSON（他手動貼錯、
+ * 或 GitHub 回了非預期的東西），那段就會把他的估值印出去。
+ * `store.js` 的 `parseGistText` 本來就是這樣處理的，這裡照同一個做法。
+ */
+export function parseGistState(text) {
+  let state;
+  try {
+    state = JSON.parse(text);
+  } catch (e) {
+    // 刻意不帶 e.message：它含有內容片段。
+    throw new Error('gist 裡的內容不是有效的 JSON');
+  }
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    throw new Error('gist 裡的內容不是一個物件');
+  }
+  // schemaVersion 是我們自己的欄位、只會是小整數，印出來不洩漏任何東西。
   if (state.schemaVersion !== 2) {
-    throw new Error(`gist 裡的 schemaVersion 是 ${state.schemaVersion}，不是 2`);
+    throw new Error(`gist 裡的 schemaVersion 是 ${JSON.stringify(state.schemaVersion)}，不是 2`);
   }
   return state;
 }
@@ -310,7 +355,12 @@ async function main() {
     try {
       state = await fetchGist(env.GIST_ID);
     } catch (e2) {
-      console.log(`抓 gist 失敗兩次，跳過這一次（${e2.message}）。`);
+      // **不要印 e2.message。** fetchGist 自己丟的訊息是安全的，但 `fetch` 失敗、
+      // `res.json()` 失敗之類的例外訊息不是我們控制的，可能夾帶含 gist id 的網址
+      // 或 gist 內容的片段——而這個 log 是公開的。只印錯誤類型，夠他判斷方向了：
+      // 真的要查就去看 gist 網址對不對。
+      console.log(`抓 gist 失敗兩次（${e2 && e2.name ? e2.name : '不明'}），跳過這一次。`
+        + '請確認 GIST_ID 這個 secret 是對的，以及那個 gist 裡的 iv-data.json 是合法的 JSON。');
       return 0;
     }
   }

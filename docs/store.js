@@ -1145,11 +1145,17 @@
         var j = subJson(sub);
         // endpoint 記下來，之後才比對得出「訂閱換了但他還沒重新貼」。
         var patch = { pushEndpoint: j.endpoint };
-        // **endpoint 換了就一定要清掉 pushCopiedAt。** 不清的話 pushState() 會算出
-        // 「存的 endpoint === 現在的 endpoint」而回傳 'on'，畫面說「訂閱資訊也複製
-        // 過了」——而 GitHub 上還是舊的 endpoint，他一則都收不到又看不到任何警告。
-        // 這正是這整套偵測要防的靜默失敗，差點被自己的重新訂閱路徑繞過去。
-        if (prevEndpoint && j.endpoint !== prevEndpoint) patch.pushCopiedAt = '';
+        // **endpoint 跟存的不一樣就一定要清掉 pushCopiedAt。** 不清的話 pushState()
+        // 會算出「存的 endpoint === 現在的 endpoint」而回傳 'on'，畫面說「訂閱資訊
+        // 也複製過了」——而 GitHub 上還是舊的 endpoint，他一則都收不到又看不到任何
+        // 警告。這正是這整套偵測要防的靜默失敗，差點被自己的重新訂閱路徑繞過去。
+        //
+        // 刻意**不要**寫成 `prevEndpoint && j.endpoint !== prevEndpoint`：那個
+        // `prevEndpoint &&` 會讓「pushCopiedAt 有值但 pushEndpoint 空著」漏掉清除
+        // （markPushCopied() 在查不到訂閱時只寫 pushCopiedAt），結果一樣謊報 'on'。
+        // 空字串跟任何真實 endpoint 本來就不同，而第一次訂閱時 pushCopiedAt 已經
+        // 是空的，多清一次沒有副作用。
+        if (j.endpoint !== prevEndpoint) patch.pushCopiedAt = '';
         setDeviceConfig(patch);
         return { ok: true, sub: j };
       });

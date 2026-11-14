@@ -885,8 +885,10 @@ tr.row-error td {
 /* ---- 手機 ---- */
 
 @media (max-width: 830px) {
-  /* 手機上 topbar 換行後高達 114px，是螢幕的 14%。
-     黏著它只會讓捲到上緣的卡片永遠被蓋住一塊，不值得——改成一般捲動。 */
+  /* 手機上 topbar 會換行：375px 下量到 114px（兩個標籤時）、
+     164px（環境／新鮮度／通知三個標籤全開的最壞情況，約螢幕的 20%）。
+     黏著它只會讓捲到上緣的卡片永遠被蓋住一塊，不值得——改成一般捲動。
+     （三個標籤同時出現時橫向不會溢出，實測 375px 下三個都在同一行、y=65。） */
   .topbar { position: static; }
   .table-wrap, .calc-result, tbody tr { scroll-margin-top: 12px; }
 

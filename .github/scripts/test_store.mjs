@@ -248,6 +248,34 @@ async function testEndpointChangeInvalidatesCopy() {
   eq('重新複製後 → on', (await S.pushState()).kind, 'on');
 }
 
+// ---- 5b. 回歸：pushCopiedAt 有值但 pushEndpoint 空著時也要清 ----
+//
+// 這是修 5 的時候自己留下的洞：條件寫成 `prevEndpoint && j.endpoint !== prevEndpoint`，
+// 那個 `prevEndpoint &&` 讓「pushCopiedAt 有值、pushEndpoint 是空字串」這個狀態
+// 漏掉清除，於是訂閱完 pushState() 回 'on'——而他從沒複製過那個新 endpoint，
+// GitHub 上什麼都沒有。
+//
+// 這個狀態怎麼來的：markPushCopied() 在「查不到訂閱」時只寫 pushCopiedAt、
+// 不寫 pushEndpoint。要走到那裡，訂閱得在「顯示訂閱資訊」與「按複製」之間消失，
+// 機率極低——但這一格存在的唯一理由就是防靜默失敗，留著洞不划算。
+async function testCopiedWithoutEndpoint() {
+  const { S } = loadStore({ push: true });
+
+  S.setDeviceConfig({
+    vapidKey: vapidPublicKey(),
+    pushCopiedAt: '2026-11-01T00:00:00Z',
+    pushEndpoint: ''
+  });
+  eq('起始狀態是 off（沒有訂閱）', (await S.pushState()).kind, 'off');
+
+  const r = await S.enablePush();
+  ok('訂閱成功', r.ok === true);
+  eq('訂到了一個 endpoint', r.sub.endpoint.endsWith('/A'), true);
+  eq('pushCopiedAt 必須被清掉（他沒複製過這個新 endpoint）',
+    S.deviceConfig().pushCopiedAt, '');
+  eq('所以狀態是 uncopied，不是 on', (await S.pushState()).kind, 'uncopied');
+}
+
 // ---- 6. 回歸：訂閱不見了要分得出 lost 與 off ----
 async function testLostVsOff() {
   const { S } = loadStore({ push: true });
@@ -279,8 +307,14 @@ function testCopyFallbackOrdering() {
     app.includes('      return Promise.resolve();\n    }'));
   ok('refreshPushUi 的主路徑有 return', app.includes('return Store.pushState().then(function (s) {'));
   ok('finish 把 refreshPushUi 串起來等它', app.includes('return refreshPushUi();'));
+  // indexOf 相減的寫法在「字串根本不存在」時會回 -1 而假通過。
+  // 同組上面那條 includes 擋得住不存在的情況，但這一條自己也該誠實：
+  // 兩個都找得到才比較順序。
+  const iRefresh = app.indexOf('return refreshPushUi();');
+  const iFallback = app.indexOf('if (fallbackText) pushMsg(fallbackText, true);');
   ok('fallback 訊息排在 refreshPushUi 之後',
-    app.indexOf('return refreshPushUi();') < app.indexOf('if (fallbackText) pushMsg(fallbackText, true);'));
+    iRefresh !== -1 && iFallback !== -1 && iRefresh < iFallback,
+    `refreshPushUi=${iRefresh} fallback=${iFallback}`);
 }
 
 // ---- 8. 結構性檢查：三處版本號一致 ----
@@ -314,6 +348,7 @@ const run = async () => {
   testNoSecretsInState();
   await testVapidKey();
   await testEndpointChangeInvalidatesCopy();
+  await testCopiedWithoutEndpoint();
   await testLostVsOff();
   testCopyFallbackOrdering();
   testBuildNumbers();
