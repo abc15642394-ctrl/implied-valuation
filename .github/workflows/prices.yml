@@ -76,9 +76,13 @@ jobs:
           FORCE_TEST: ${{ inputs.test_push }}
         run: node .github/scripts/notify.mjs --new docs/prices.json --old /tmp/prev.json
 
-      # 純函式的測試，不碰網路也不碰 secret。放在最後：它擋不住今天的收盤價，
-      # 但一旦有人改壞了判斷邏輯（例如把「未估」當成 0%），這裡會紅。
-      - name: 跑通知邏輯的測試
+      # 三套純函式的測試，不裝東西、不碰網路、不需要 secret。放在最後：
+      # 它們擋不住今天的收盤價，但一旦有人改壞了判斷邏輯，這裡會紅。
+      #   test_notify — 通知要不要推、推什麼、log 不能印出估值
+      #   test_store  — 資料層（同步設定、推播訂閱狀態、秘密不進 state）
+      #   test_match  — 從 LINE 訊息找出是哪一檔的那套規則
+      - name: 跑三套測試
         run: |
           node .github/scripts/test_notify.mjs
           node .github/scripts/test_store.mjs
+          node .github/scripts/test_match.mjs

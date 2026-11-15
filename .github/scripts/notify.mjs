@@ -312,9 +312,20 @@ export function parseGistState(text) {
   if (!state || typeof state !== 'object' || Array.isArray(state)) {
     throw new Error('gist 裡的內容不是一個物件');
   }
-  // schemaVersion 是我們自己的欄位、只會是小整數，印出來不洩漏任何東西。
+  // schemaVersion **只有在它真的是數字時才印值**。
+  //
+  // build 24 這裡原本是 `JSON.stringify(state.schemaVersion)`，註解寫著
+  // 「這是我們自己的欄位、只會是小整數」——**那是假設，不是保證**。gist 的內容是
+  // 一個檔案，壞成什麼樣都有可能，而這個訊息會進公開的 Actions log。實測：
+  //   schemaVersion: "台積電 2330 我估 18.5%"  → 整串印出去
+  //   schemaVersion: { note: "富喬 1815 …" }    → 整個物件印出去
+  // 這跟當初要修的 `e2.message` 完全是同一類錯誤：假設某個值安全就直接印。
+  // 不是數字就只印型別，看的人仍然知道「版本號長得不對」，而且洩漏不了東西。
   if (state.schemaVersion !== 2) {
-    throw new Error(`gist 裡的 schemaVersion 是 ${JSON.stringify(state.schemaVersion)}，不是 2`);
+    var v = state.schemaVersion;
+    var shown = (typeof v === 'number' || v === null || v === undefined)
+      ? String(v) : typeof v;
+    throw new Error('gist 裡的 schemaVersion 是 ' + shown + '，不是 2');
   }
   return state;
 }

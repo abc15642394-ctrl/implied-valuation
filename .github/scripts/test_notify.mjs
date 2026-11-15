@@ -370,9 +370,20 @@ function testGistParseNoLeak() {
     ['空字串', ''],
     ['是陣列不是物件', '[1,2,3]'],
     ['null', 'null'],
-    ['schemaVersion 不是 2', '{"schemaVersion":1,"stocks":[]}']
+    ['schemaVersion 不是 2', '{"schemaVersion":1,"stocks":[]}'],
+    // 下面三個是 build 25 補的。build 24 抽出 parseGistState() 就是為了「錯誤訊息
+    // 全部自己控制」，但它自己留了一條 `JSON.stringify(state.schemaVersion)`
+    // ——當時的註解寫「schemaVersion 只會是小整數」，那是假設不是保證。
+    // 而上面那條案例用的值是 `1`（安全值），所以測不出來：同一種盲點又來一次。
+    ['schemaVersion 是字串', '{"schemaVersion":"台積電 2330 我估 18.5%","stocks":[]}'],
+    ['schemaVersion 是物件', '{"schemaVersion":{"note":"富喬 1815 成本 70.5"},"stocks":[]}'],
+    ['schemaVersion 是陣列', '{"schemaVersion":["2330","1815"],"stocks":[]}']
   ];
-  const leaky = ['台積電', '2330', '18.5', '筆記', 'ticker', 'stocks', 'Not Found'];
+  // 這份清單必須涵蓋**上面每一個案例裡出現過的字**，否則某個案例會因為
+  // 「偵測器沒看那個字」而假通過——build 25 第一次跑就是這樣：物件那條案例裡的
+  // 富喬／1815／70.5 都不在清單上，所以它看起來是綠的。
+  const leaky = ['台積電', '2330', '18.5', '筆記', 'ticker', 'stocks', 'Not Found',
+    '富喬', '1815', '70.5', 'note'];
 
   for (const [name, text] of cases) {
     let msg = null;
