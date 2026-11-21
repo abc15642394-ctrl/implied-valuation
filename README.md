@@ -52,16 +52,25 @@ EPS 先用「1-5 年成長率」成長五年、再用「6-10 年成長率」成�
 python3 -m http.server 8000 --directory docs
 ```
 
-`.github/scripts/` 底下是收盤價與通知的腳本，以及兩套測試。**改完請跑過**：
+`.github/scripts/` 底下是收盤價與通知的腳本，以及**四套測試**。**改完請跑過**：
 
 ```
-node .github/scripts/test_store.mjs
 node .github/scripts/test_notify.mjs
+node .github/scripts/test_store.mjs
+node .github/scripts/test_match.mjs
+python3 .github/scripts/test_prices.py
 ```
 
-它們不裝任何東西、不碰網路、不需要 secret，鎖住的是幾個踩過的坑
-（「未估」不能當成 0%、秘密不能進同步的 state、公開的 Actions log 不能印出估值、
-三處版本號必須同步）。CI 的 workflow 最後一步也會跑這兩套。
+它們不裝任何東西、不碰網路、不需要 secret，鎖住的是幾個踩過的坑：
+「未估」不能當成 0%；秘密不能進同步的 state；公開的 Actions log 不能印出估值；
+三處版本號必須同步；從 LINE 訊息找股票的那四道守門（代號會撞年份、
+名錄裡有一千多個兩字名稱）；手機卡片的每一欄都要有明確的排列順序；
+收盤價管線不能因為一列壞資料就整天不更新、也不能安靜地少掉一批。
+CI 的 workflow 最後一步也會跑這四套。
+
+每一套都做過**突變測試**——故意把邏輯改壞，確認測試真的會紅。
+這個專案已經為「斷言因為巧合而通過」付出過好幾次代價，所以新增斷言時
+請先確認它在修之前是紅的。
 
 `web-push` 是唯一的執行期依賴，只有 Actions 的通知腳本用到：`npm ci`。
 

@@ -58,6 +58,29 @@ export function loadThresholds(appSource) {
   return { good: -5, bad: 5, fromSource: false };
 }
 
+// ---- secret 的讀取 ----
+//
+// 五個 secret 一律去頭尾空白。貼進 GitHub 的欄位時多一個空白或換行是最常見的失誤，
+// 而尾端一個換行會讓網址變成 `.../gists/abc123%0A`——**必定 404，而且看起來跟
+// 「id 打錯」一模一樣**。2026-11-16 到 11-20 五次執行全部靜默跳過就是這樣來的。
+// app 那一邊早就有這道紀律（`store.js` 的 deviceConfig 讀與寫都 trim），發送端漏了。
+//
+// VAPID 的兩把更不能漏：它們不在 try 裡，`setVapidDetails()` 丟出來會被最外層
+// catch 接走，印一句「通知腳本出錯」然後 exit 1——每日的 job 會紅，而信上看不出原因。
+//
+// 抽成純函式是為了可測（沿用這個檔案自己 decide() 的做法）。
+export const SECRET_KEYS = ['GIST_ID', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY',
+  'VAPID_SUBJECT', 'PUSH_SUB'];
+
+export function readSecrets(env) {
+  const src = env || {};
+  const out = {};
+  for (const k of SECRET_KEYS) {
+    out[k] = typeof src[k] === 'string' ? src[k].trim() : '';
+  }
+  return out;
+}
+
 // ---- 純邏輯 ----
 
 function num(v, fallback) {
@@ -247,6 +270,25 @@ export function decide({ V, th, state, oldPrices, newPrices, now, forceTest }) {
 
 // ---- 以下開始碰外界 ----
 
+/**
+ * 自己丟的 gist 錯誤。掛一個 `.reason` 當記號。
+ *
+ * 為什麼需要記號：`fetchGist` 與 `parseGistState` 丟的訊息全部是**手寫的固定字串**，
+ * 而且 `testGistParseNoLeak` 用十個會洩漏的輸入證明過它們不夾帶 gist 內容——
+ * 所以它們是可以印進公開 log 的。不能印的是 `fetch`／`res.json()` 丟的例外：
+ * 訊息我們控制不了，可能夾帶含 gist id 的網址或內容片段。
+ *
+ * 先前一律只印 `e2.name`，結果五種原因（404／403／沒有檔案／不是合法 JSON／
+ * schemaVersion 不對）**全部印成同一個字「Error」**，只有真的連不上才印 TypeError。
+ * 等於出事的時候 log 什麼都沒說——查了一整個 session 才確定是哪一種。
+ */
+function gistError(reason) {
+  const e = new Error(reason);
+  e.name = 'GistError';
+  e.reason = reason;
+  return e;
+}
+
 function arg(name) {
   const i = process.argv.indexOf(name);
   return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : null;
@@ -276,15 +318,15 @@ async function fetchGist(gistId) {
     headers: { Accept: 'application/vnd.github+json' },
     cache: 'no-store'
   });
-  if (!res.ok) throw new Error(`GitHub 回應 ${res.status}`);
+  if (!res.ok) throw gistError(`GitHub 回應 ${res.status}`);
   const g = await res.json();
   const files = g.files || {};
   const f = files['iv-data.json'] || files[Object.keys(files)[0]];
-  if (!f) throw new Error('gist 裡沒有檔案');
+  if (!f) throw gistError('gist 裡沒有檔案');
   let text = f.content;
   if (f.truncated && f.raw_url) {
     const r2 = await fetch(f.raw_url, { cache: 'no-store' });
-    if (!r2.ok) throw new Error(`抓 gist 內容回應 ${r2.status}`);
+    if (!r2.ok) throw gistError(`抓 gist 內容回應 ${r2.status}`);
     text = await r2.text();
   }
   return parseGistState(text);
@@ -307,10 +349,10 @@ export function parseGistState(text) {
     state = JSON.parse(text);
   } catch (e) {
     // 刻意不帶 e.message：它含有內容片段。
-    throw new Error('gist 裡的內容不是有效的 JSON');
+    throw gistError('gist 裡的內容不是有效的 JSON');
   }
   if (!state || typeof state !== 'object' || Array.isArray(state)) {
-    throw new Error('gist 裡的內容不是一個物件');
+    throw gistError('gist 裡的內容不是一個物件');
   }
   // schemaVersion **只有在它真的是數字時才印值**。
   //
@@ -325,22 +367,23 @@ export function parseGistState(text) {
     var v = state.schemaVersion;
     var shown = (typeof v === 'number' || v === null || v === undefined)
       ? String(v) : typeof v;
-    throw new Error('gist 裡的 schemaVersion 是 ' + shown + '，不是 2');
+    throw gistError('gist 裡的 schemaVersion 是 ' + shown + '，不是 2');
   }
   return state;
 }
 
 async function main() {
-  const env = process.env;
-  const need = ['GIST_ID', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT', 'PUSH_SUB'];
-  const missing = need.filter((k) => !env[k]);
+  // 一律走 readSecrets：它會去頭尾空白。直接讀 process.env 的話，貼進 GitHub 時
+  // 多的那一個換行會一路帶到網址裡（見 readSecrets 的註解）。
+  const sec = readSecrets(process.env);
+  const missing = SECRET_KEYS.filter((k) => !sec[k]);
   if (missing.length) {
     // 通知沒設好，不能讓每日收盤價的 job 跟著失敗——那是比通知重要的產出。
     console.log(`通知沒設定（缺 ${missing.length} 個 secret），跳過。`);
     return 0;
   }
 
-  const subs = parseSubs(env.PUSH_SUB);
+  const subs = parseSubs(sec.PUSH_SUB);
   if (!subs.length) {
     console.log('PUSH_SUB 解不出有效的訂閱（要有 endpoint 與 keys.p256dh／keys.auth），跳過。');
     return 0;
@@ -358,25 +401,32 @@ async function main() {
     console.log('⚠️ 從 docs/app.js 讀不到 GAP_GOOD／GAP_BAD，改用預設 ±5。請檢查常數名稱有沒有被改掉。');
   }
 
-  let state;
+  // **forceTest 必須在抓 gist 之前算出來。** 「送一則測試通知」驗的是
+  // Actions → Apple → 手機這一段，跟 gist 一點關係都沒有；先前它排在抓 gist 之後，
+  // 所以 gist 一失敗就 return 0，**最需要用它來分辨問題的時候反而送不出去**。
+  // 2026-11-16 那次手動測試加上四次排程全部靜默，就是這個順序造成的。
+  const forceTest = String(process.env.FORCE_TEST || '').trim().toLowerCase() === 'true';
+
+  let state = null;
   try {
-    state = await fetchGist(env.GIST_ID);
+    state = await fetchGist(sec.GIST_ID);
   } catch (e1) {
-    // 網路抖動不值得寄一封失敗信給他。重試一次，還是不行就安靜跳過。
+    // 網路抖動不值得寄一封失敗信給他。重試一次，還是不行就跳過（或只送測試通知）。
     try {
-      state = await fetchGist(env.GIST_ID);
+      state = await fetchGist(sec.GIST_ID);
     } catch (e2) {
-      // **不要印 e2.message。** fetchGist 自己丟的訊息是安全的，但 `fetch` 失敗、
-      // `res.json()` 失敗之類的例外訊息不是我們控制的，可能夾帶含 gist id 的網址
-      // 或 gist 內容的片段——而這個 log 是公開的。只印錯誤類型，夠他判斷方向了：
-      // 真的要查就去看 gist 網址對不對。
-      console.log(`抓 gist 失敗兩次（${e2 && e2.name ? e2.name : '不明'}），跳過這一次。`
-        + '請確認 GIST_ID 這個 secret 是對的，以及那個 gist 裡的 iv-data.json 是合法的 JSON。');
-      return 0;
+      // **絕對不要印 e2.message。** 但 `.reason` 是我們自己掛的記號（見 gistError）：
+      // 有它就代表這句話是我們手寫的固定字串，印出來是安全的，而且它才真的說明了
+      // 是哪一種失敗。沒有 `.reason` 的是 fetch／res.json() 丟的，只印型別。
+      const why = (e2 && e2.reason) ? e2.reason : `不明（${(e2 && e2.name) || '無型別'}）`;
+      console.log(`抓 gist 失敗兩次（${why}），這一次拿不到你的估值。`
+        + '請確認 GIST_ID 這個 secret 是對的（貼的時候尾端多一個空白或換行也會變成 404），'
+        + '以及那個 gist 裡的 iv-data.json 是合法的 JSON。');
+      if (!forceTest) return 0;
+      console.log('不過有勾「送一則測試通知」，所以還是送一則——那一段跟 gist 無關。');
     }
   }
 
-  const forceTest = String(env.FORCE_TEST || '').toLowerCase() === 'true';
   const messages = decide({
     V: loadValuation(), th, state,
     oldPrices: oldPrices || {}, newPrices,
@@ -384,13 +434,14 @@ async function main() {
   });
 
   // 從這裡開始到結束，log 只准出現數字與固定字串。
-  console.log(`追蹤 ${(state.stocks || []).length} 檔；決定要送 ${messages.length} 則`
+  // state 可能是 null（抓 gist 失敗但勾了測試通知），所以不能直接讀 .stocks。
+  console.log(`追蹤 ${((state && state.stocks) || []).length} 檔；決定要送 ${messages.length} 則`
     + `（${messages.map((m) => m.kind).join('／') || '無'}）；訂閱 ${subs.length} 個`);
 
   if (!messages.length) return 0;
 
   const webpush = (await import('web-push')).default;
-  webpush.setVapidDetails(env.VAPID_SUBJECT, env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY);
+  webpush.setVapidDetails(sec.VAPID_SUBJECT, sec.VAPID_PUBLIC_KEY, sec.VAPID_PRIVATE_KEY);
 
   let sent = 0;
   let dead = 0;

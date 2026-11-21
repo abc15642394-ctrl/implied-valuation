@@ -35,6 +35,18 @@ function eq(name, got, want) {
   return ok(name, g === w, `得到 ${g}\n       應為 ${w}`);
 }
 
+// 結構性檢查**一律先剝掉註解**。
+//
+// 這個陷阱在 build 26 這一輪踩了兩次：修完之後我習慣在註解裡引用被換掉的舊寫法
+// （「先前寫 `if (!Store.canPush()) return null;`」），而掃全文的斷言會把那段註解
+// 當成還沒改——`notify.mjs` 的 `e2.message` 也是同一回事。
+// 剝掉整行註解與區塊註解的續行，斷言看到的就只有真的會執行的程式。
+function codeOnly(text) {
+  return String(text).split('\n')
+    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .join('\n');
+}
+
 // ---- 載入 ----
 
 // 假的 localStorage。回傳 store 本身，測試可以直接塞壞資料進去。
@@ -317,6 +329,115 @@ function testCopyFallbackOrdering() {
     `refreshPushUi=${iRefresh} fallback=${iFallback}`);
 }
 
+// ---- 7b. 結構性檢查：手機卡片的欄位順序 ----
+//
+// build 26 修的真缺陷。`#stockTable` 的手機卡片是 `display: grid` ＋ `order`，
+// 而**沒設 order 又沒被隱藏的欄位會拿到預設的 order: 0**，也就是排到代號
+// （order 1）前面去。先前 `count`（筆數）與 `date`（更新）兩欄都沒被提到，
+// 所以每一張卡片最上面兩格是「筆數 3」「更新 11-20」，代號與落差被推到第二行
+// ——而追蹤清單是預設分頁，那是打開 app 第一眼看到的東西。
+//
+// 過去的回歸檢查只量「四張表有沒有橫向溢出」，從來沒有檢查排列順序，所以這個
+// 缺陷活了很久。這一條就是把那個檢查變成機器做的：**每一欄都必須有明確歸屬。**
+function testMainCardColumns() {
+  const app = read('docs/app.js');
+  const css = read('docs/app.css');
+
+  // rowHtml() 實際發出哪些 data-col
+  const body = app.slice(app.indexOf('function rowHtml(row)'), app.indexOf('function refreshMainRow'));
+  const cols = [];
+  for (const m of body.matchAll(/(?:cell\('|priceCell\(s, '|editCell\(r, ')([a-zA-Z0-9_]+)'/g)) {
+    if (cols.indexOf(m[1]) === -1) cols.push(m[1]);
+  }
+  eq('主表發出 13 欄', cols.length, 13);
+
+  const orders = {};
+  for (const m of css.matchAll(/#stockTable tbody td\[data-col="([a-zA-Z0-9_]+)"\][^{]*\{([^}]*)\}/g)) {
+    const o = m[2].match(/order:\s*(\d+)/);
+    if (o) orders[m[1]] = parseInt(o[1], 10);
+  }
+  const hidden = new Set();
+  for (const m of css.matchAll(/((?:#stockTable tbody td\[data-col="[a-zA-Z0-9_]+"\][,\s]*)+)\{([^}]*)\}/g)) {
+    if (m[2].indexOf('display: none') !== -1) {
+      for (const h of m[1].matchAll(/data-col="([a-zA-Z0-9_]+)"/g)) hidden.add(h[1]);
+    }
+  }
+
+  const unplaced = cols.filter((c) => !hidden.has(c) && orders[c] === undefined);
+  ok('每一欄都要嘛有 order、要嘛被明確隱藏（沒有的會排到代號前面）',
+    unplaced.length === 0, `沒有歸屬的欄位：${unplaced.join('、')}`);
+
+  const named = new Set([...Object.keys(orders), ...hidden]);
+  const ghosts = [...named].filter((c) => cols.indexOf(c) === -1).sort();
+  ok('CSS 沒有指名主表不發的欄位（欄位改名後的遺留）',
+    ghosts.length === 0, `幽靈欄位：${ghosts.join('、')}`);
+
+  // 代號必須是視覺上的第一格
+  const visible = cols.filter((c) => !hidden.has(c));
+  const first = visible.slice().sort((a, b) => orders[a] - orders[b])[0];
+  eq('卡片的第一格是代號', first, 'ticker');
+
+  // 「點卡片展開」那套規則 app.js 從來沒有實作（expanded 只用在 AI 試算頁）
+  eq('主表沒有殘留的 tr.expanded 規則',
+    (css.match(/#stockTable tbody tr\.expanded/g) || []).length, 0);
+
+  // 上面那一條刪掉主表的死規則，所以這裡要確認**沒有順手刪掉真的在用的那一套**：
+  // AI 試算頁的展開是真的，JS 會加 class、CSS 也有對應規則，兩邊缺一邊就壞。
+  //
+  // （第一版我在這裡寫「整個 app.js 只有一個地方會加 expanded」，並拿它當保護。
+  //  突變測試顯示那條抓不到「主表也加 expanded」——但想清楚之後，那個突變
+  //  **不是真缺陷**：主表多掛一個沒有任何 CSS 的 class 是惰性的。
+  //  斷言應該測「壞了會痛的事」，所以改成測 AI 那一套的兩邊都還在。）
+  const iAi = app.indexOf('function aiRowHtml');
+  const iEnd = app.indexOf('function aiRows');
+  ok('AI 試算頁的列還是會加 expanded（展開互動的 JS 那一半）',
+    iAi !== -1 && iEnd > iAi && app.slice(iAi, iEnd).indexOf('class="expanded"') !== -1,
+    'aiRowHtml 不再加 expanded，展開互動壞了');
+  ok('而且 CSS 那一半也還在（#aiTable 的 tr.expanded 規則）',
+    /#aiTable tbody tr\.expanded/.test(css), '#aiTable 的 expanded 規則被刪掉了');
+}
+
+// ---- 7c. 結構性檢查：帶入鍵問的是「是不是副本」，不是「能不能推」----
+//
+// build 26 修的真缺陷。canPush() 是 token && gistId，所以「還沒設定 gist 的正本」
+// 與「token 剛好過期的電腦」都會被誤判成手機而失去帶入鍵——而他的 classic token
+// 有到期日，到期那天 Mac 上的帶入鍵會無聲消失。
+function testPendingCloseUsesReplica() {
+  const app = read('docs/app.js');
+  const fn = codeOnly(app.slice(app.indexOf('function pendingClose(stock)'),
+                                app.indexOf('function closeBtn(stock)')));
+  ok('pendingClose 不再用 !Store.canPush() 當判準',
+    !/if \(!Store\.canPush\(\)\) return null;/.test(fn), '又改回 canPush 了');
+  ok('pendingClose 問的是 backupState().kind === \'replica\'',
+    fn.indexOf("backupState().kind === 'replica'") !== -1);
+  // 另外三處既有的寫法不能被改壞（它們是這個判斷的其他三個出口）
+  ok('renderFreshTag 仍然同時看 canPush 與 canPull',
+    app.indexOf('if (Store.canPush() || !Store.canPull()') !== -1);
+  ok('saveQuick 仍然同時看 canPush 與 canPull',
+    app.indexOf('if (!Store.canPush() && Store.canPull())') !== -1);
+}
+
+// ---- 7d. 結構性檢查：6-10 年留空＝設定的預設值，不是 0% ----
+//
+// 2% vs 5% 實測會讓市場隱含差 2.46pp，而落差門檻是 ±5pp——足以讓紅綠燈翻面。
+// 先前主計算器存 0%、快速估值視窗存預設值，同一個欄位兩種行為。
+function testG610Default() {
+  // 這裡同樣要 codeOnly：註解裡引用了舊寫法 `v.g610 === null ? 0 : v.g610`，
+  // 掃全文的話會因為自己的註解而誤判（而且先前是「剛好沒撞到」才通過的）。
+  const app = codeOnly(read('docs/app.js'));
+  ok('沒有任何地方把留空的 6-10 年當成 0',
+    !/cagr6_10: v\.g610 === null \? 0/.test(app) && !/var g610 = v\.g610 === null \? 0/.test(app),
+    '還有地方把它當成 0%');
+  ok('helper 存在', app.indexOf('function g610OrDefault(v)') !== -1);
+  ok('helper 回的是 settings().defaultCagr6_10',
+    /function g610OrDefault\(v\) \{\s*\n\s*return \(v === null \|\| v === undefined\) \? settings\(\)\.defaultCagr6_10 : v;/.test(app));
+  // 顯示與儲存都要走它，否則會變成「畫面用 0% 算、存進去用 5%」
+  // 五個呼叫點：主計算器的顯示、快速估值視窗的顯示、以及三處儲存
+  //（加入追蹤的新增與編輯、快速估值的存檔）。減 1 是扣掉函式定義本身。
+  eq('兩處顯示與三處儲存都走 helper（共 5 個呼叫點）',
+    (app.match(/g610OrDefault\(/g) || []).length - 1, 5);
+}
+
 // ---- 8. 結構性檢查：三處版本號一致 ----
 //
 // 不一致的話 versionMatches() 會 hardReset 一次，再不一致就跳「版本不一致」擋版。
@@ -351,6 +472,9 @@ const run = async () => {
   await testCopiedWithoutEndpoint();
   await testLostVsOff();
   testCopyFallbackOrdering();
+  testMainCardColumns();
+  testPendingCloseUsesReplica();
+  testG610Default();
   testBuildNumbers();
   testNoHardcodedGist();
 

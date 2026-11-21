@@ -560,54 +560,28 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
   #stockTable tbody td[data-col="myCagr1_5"] { order: 6; }
   #stockTable tbody td[data-col="fairValue"] { order: 7; }
 
-  /* 其餘收起，點卡片展開 */
-  #stockTable tbody td[data-col="market"],
+  /* 這五欄在卡片上收起來——點卡片會開下面的分頁表，那裡每一筆都看得到。
+     （CSS 原本寫「點卡片展開」並為此備了 31 行 `tr.expanded` 規則，但 app.js
+      從來沒有把 `expanded` 加到主表的列上——那個 class 只用在 AI 試算頁的列。
+      承諾了卻不存在的互動比沒有更糟，所以整段刪掉，文案改成實際行為。）
+
+     **這份清單必須涵蓋主表發出的每一個欄位。** 沒設 order 又沒被隱藏的欄位會拿到
+     預設的 `order: 0`，也就是排到代號（order 1）前面去——先前 `count`（筆數）與
+     `date`（更新）就是這樣跑到每張卡片最上面的，而追蹤清單是預設分頁，
+     那是打開 app 第一眼看到的東西。過去的回歸檢查只量橫向溢出，不看排列順序。
+     （清單裡原本還列著 market／cagr6_10／tvShare／tags／updatedAt／note 六個
+      主表根本不發的欄位，是欄位改名與移除之後的遺留，一併清掉。） */
   #stockTable tbody td[data-col="eps"],
-  #stockTable tbody td[data-col="cagr6_10"],
   #stockTable tbody td[data-col="upside"],
-  #stockTable tbody td[data-col="tvShare"],
-  #stockTable tbody td[data-col="tags"],
+  #stockTable tbody td[data-col="count"],
   #stockTable tbody td[data-col="status"],
-  #stockTable tbody td[data-col="updatedAt"],
-  #stockTable tbody td[data-col="note"],
   #stockTable tbody td[data-col="actions"] {
     display: none;
-    grid-column: 1 / -1;
   }
 
-  #stockTable tbody tr.expanded td[data-col="market"],
-  #stockTable tbody tr.expanded td[data-col="eps"],
-  #stockTable tbody tr.expanded td[data-col="cagr6_10"],
-  #stockTable tbody tr.expanded td[data-col="upside"],
-  #stockTable tbody tr.expanded td[data-col="tvShare"],
-  #stockTable tbody tr.expanded td[data-col="tags"],
-  #stockTable tbody tr.expanded td[data-col="status"],
-  #stockTable tbody tr.expanded td[data-col="updatedAt"],
-  #stockTable tbody tr.expanded td[data-col="note"],
-  #stockTable tbody tr.expanded td[data-col="actions"] {
-    display: flex;
-  }
-
-  #stockTable tbody tr.expanded td[data-col="market"],
-  #stockTable tbody tr.expanded td[data-col="eps"],
-  #stockTable tbody tr.expanded td[data-col="cagr6_10"],
-  #stockTable tbody tr.expanded td[data-col="upside"],
-  #stockTable tbody tr.expanded td[data-col="tvShare"] {
-    grid-column: auto;
-  }
-
-  #stockTable tbody tr.expanded td[data-col="market"] { order: 8; }
-  #stockTable tbody tr.expanded td[data-col="eps"] { order: 9; }
-  #stockTable tbody tr.expanded td[data-col="cagr6_10"] { order: 10; }
-  #stockTable tbody tr.expanded td[data-col="upside"] { order: 11; }
-  #stockTable tbody tr.expanded td[data-col="tvShare"] { order: 12; }
-  #stockTable tbody tr.expanded td[data-col="tags"] { order: 13; }
-  #stockTable tbody tr.expanded td[data-col="status"] { order: 14; }
-  #stockTable tbody tr.expanded td[data-col="updatedAt"] { order: 15; }
-  #stockTable tbody tr.expanded td[data-col="note"] { order: 16; }
-  #stockTable tbody tr.expanded td[data-col="actions"] { order: 17; justify-content: flex-end; }
-
-  #stockTable tbody td[data-col="note"] { color: var(--muted); font-size: .8rem; }
+  /* 更新日期留在卡片上：它帶著「超過 30 天沒更新」的 .badge.stale 標記，
+     是這張卡片上唯一的新鮮度線索。 */
+  #stockTable tbody td[data-col="date"] { order: 8; }
 
   td input, td textarea {
     width: 90px;
@@ -616,13 +590,8 @@ tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--c-signal); }
     padding: 5px 8px;
   }
 
-  .row-tags { max-width: none; }
-
   .signal-cell.na { font-size: .82rem; text-align: right; }
 }
-
-/* 備註只在手機展開時出現；桌機靠名稱欄的 title 提示。 */
-#stockTable td[data-col="note"] { display: none; }
 
 /* ---- 估值計算器 ---- */
 
@@ -746,6 +715,11 @@ button.primary { width: 100%; }
 
 .calc-grid > label.g-fact,
 .calc-grid > label.g-mine { color: var(--text); font-weight: 600; }
+
+/* `.wide` 在 index.html 用了兩次（分類標籤、這一筆的備註），但**從來沒有規則**
+   ——而 .calc-grid 是 1fr 1fr，所以這兩個最需要寬度的文字框一直只佔半格。
+   名字已經說明了意圖，只是規則沒寫。 */
+.calc-grid > label.wide { grid-column: 1 / -1; }
 
 /* 結果區：每列左側一個小色點，數值用該組顏色 */
 .res-row { position: relative; padding-left: 14px; }
@@ -1335,6 +1309,12 @@ input[readonly], select:disabled {
 /* 分帶配色也掛在 .sum-table 上：隱含總表與 AI insight 看的是同一個數字，
    同一組界線，顏色就必須一樣，不能靠各自寫一份。 */
 .sum-table td.band { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* app.js 的兩張總表都把市場隱含的數值包在 .band-val 裡，但這個 class 先前
+   **沒有任何規則**——跟 build 24 修掉的 td.c-fact 同一型「沒兌現的承諾」。
+   色塊裡的數字要能上下對齊才掃得快，所以補的是等寬數字；留著不給規則最糟，
+   因為下一個人會以為它在工作。 */
+.sum-table td.band .band-val { font-variant-numeric: tabular-nums; }
 .sum-table td.band.b1 { background: var(--b1-bg); color: var(--b1-fg); }
 .sum-table td.band.b2 { background: var(--b2-bg); color: var(--b2-fg); }
 .sum-table td.band.b3 { background: var(--b3-bg); color: var(--b3-fg); }
@@ -1510,7 +1490,18 @@ button.nudge {
 }
 
 /* AI 表 13 欄，比另外兩張都寬，1024px 就已經差 67px。「估值日期」在追蹤清單
-   與隱含總表都看得到，而且它的輸入框在展開區裡，是這張表最適合讓位的一欄。 */
+   與隱含總表都看得到，而且它的輸入框在展開區裡，是這張表最適合讓位的一欄。
+
+   ⚠️ **這裡的餘裕是 0，不是「還有一點」**（2026-11-22 實測，build 26）：
+   藏掉估值日期之後，1024px 下表格最小內容寬 990 ＝ 容器可視寬 990。
+   所以追蹤一檔長名稱的 ETF 就會溢出——名錄裡最長的是「凱基ESG BBB債15+」
+   13 字，實測 AI 表溢出 10px、隱含總表 4px（831px 下隱含總表 29px）。
+   短名稱（他現在的 5 檔都是）是 0 溢出。
+   `.table-wrap` 有 overflow-x: auto，所以結果是那張表可以橫向捲，不是爆版。
+   要真的修就得同時調三張表的寬度預算，而且要用真實長度的資料量——
+   那是獨立一件事，不要順手改一個數字了事。
+   （我試過在這裡加 `#aiTable .ellip { max-width: 88px }`，**沒有作用**：
+    下面 `@media (min-width: 831px)` 那條 100px 同特異性但寫在後面，會蓋掉它。） */
 @media (min-width: 831px) and (max-width: 1100px) {
   #aiTable th[data-ai-sort="date"],
   #aiTable td[data-col="date"] { display: none; }

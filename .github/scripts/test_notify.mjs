@@ -10,7 +10,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   decide, loadValuation, loadThresholds, latestRecord, gapAt,
-  readSettings, staleDue, daysSince, parseGistState, STALE_PUSH_DAYS
+  readSettings, staleDue, daysSince, parseGistState, STALE_PUSH_DAYS,
+  readSecrets, SECRET_KEYS
 } from './notify.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -400,6 +401,134 @@ function testGistParseNoLeak() {
   eq('合法的 v2 state 解得出來', good.schemaVersion, 2);
 }
 
+// ---- 5d. 五個 secret 一定要去頭尾空白 ----
+//
+// 這一組鎖的是 2026-11-16 到 11-20「五次執行全部靜默跳過」那個真實事故：
+// 貼進 GitHub 的 GIST_ID 尾端多了空白字元，網址變成 `.../gists/xxx%0A` → 必定 404。
+// app 那一邊早就有這道紀律（store.js 讀與寫都 trim），發送端漏了。
+function testSecretsTrimmed() {
+  const dirty = {
+    GIST_ID: ' abc123def456\n',
+    VAPID_PUBLIC_KEY: '\tBNx...\t',
+    VAPID_PRIVATE_KEY: 'xyz\r\n',
+    VAPID_SUBJECT: '  mailto:a@example.com  ',
+    PUSH_SUB: '\n{"endpoint":"x"}\n'
+  };
+  const out = readSecrets(dirty);
+  eq('GIST_ID 的換行被去掉', out.GIST_ID, 'abc123def456');
+  eq('公鑰的 tab 被去掉', out.VAPID_PUBLIC_KEY, 'BNx...');
+  eq('私鑰的 CRLF 被去掉', out.VAPID_PRIVATE_KEY, 'xyz');
+  eq('subject 的空白被去掉', out.VAPID_SUBJECT, 'mailto:a@example.com');
+  eq('PUSH_SUB 的換行被去掉', out.PUSH_SUB, '{"endpoint":"x"}');
+
+  // 尾端一個換行會變成什麼：這就是那五天的實際原因
+  ok('沒 trim 的話網址會被編碼成 %0A',
+    encodeURIComponent(' abc123def456\n').includes('%0A'));
+  ok('trim 之後網址乾淨', !encodeURIComponent(out.GIST_ID).includes('%'));
+
+  eq('缺的 key 回空字串', readSecrets({}).GIST_ID, '');
+  eq('env 是 undefined 也不爆', readSecrets(undefined).GIST_ID, '');
+  eq('不是字串的值回空字串', readSecrets({ GIST_ID: 123 }).GIST_ID, '');
+  eq('只有空白的值 trim 完是空的（會被當成沒設）', readSecrets({ GIST_ID: '   ' }).GIST_ID, '');
+  eq('五個 key 不多不少', SECRET_KEYS.length, 5);
+
+  // main() 不准再直接讀 process.env 的那五個——繞過 trim 就等於沒修
+  const src = fs.readFileSync(path.join(ROOT, '.github/scripts/notify.mjs'), 'utf8');
+  for (const k of SECRET_KEYS) {
+    ok(`main() 不直接讀 process.env.${k}`, !src.includes('process.env.' + k));
+    ok(`main() 不直接讀 env.${k}`, !new RegExp('[^.\\w]env\\.' + k).test(src));
+  }
+
+  // 跟 workflow 對帳：那邊傳了什麼 secret，這邊就該讀什麼
+  const yml = fs.readFileSync(path.join(ROOT, '.github/workflows/prices.yml'), 'utf8');
+  const inYml = [...yml.matchAll(/\$\{\{\s*secrets\.([A-Z_]+)\s*\}\}/g)].map((m) => m[1]);
+  eq('workflow 傳的 secret 跟 SECRET_KEYS 一字不差',
+    [...new Set(inYml)].sort(), [...SECRET_KEYS].sort());
+}
+
+// ---- 5e. 自己丟的 gist 錯誤要印得出原因，別人丟的不准印 ----
+//
+// 先前一律只印 e2.name，五種原因（404／403／沒有檔案／不是 JSON／schemaVersion
+// 不對）**全部印成同一個字「Error」**。出事的時候 log 等於什麼都沒說。
+// 而 fetchGist／parseGistState 自己丟的訊息全部是手寫固定字串，上面那一組
+// testGistParseNoLeak 已經證明它們不夾帶內容——所以它們可以印。
+function testGistErrorReason() {
+  const secret = '台積電 2330 我估 18.5% 這是我的筆記';
+  const leaky = ['台積電', '2330', '18.5', '筆記', 'ticker', 'stocks', '富喬', '1815', '70.5'];
+
+  // 每個案例帶自己的標籤——五個共用一個斷言名字的話，紅了也分不出是哪一個。
+  const cases = [
+    ['完全不是 JSON', secret],
+    ['schemaVersion 是字串', '{"schemaVersion":"' + secret + '"}'],
+    ['是陣列不是物件', '[1,2,3]'],
+    ['空字串', ''],
+    ['schemaVersion 是 1', '{"schemaVersion":1,"stocks":[]}']
+  ];
+  for (const [label, text] of cases) {
+    let e = null;
+    try { parseGistState(text); } catch (err) { e = err; }
+    ok(`${label} → 會丟錯`, e !== null);
+    if (!e) continue;
+    ok(`${label} → 有 .reason 記號`, typeof e.reason === 'string' && e.reason.length > 0,
+      JSON.stringify({ name: e.name, reason: e.reason }));
+    eq(`${label} → .reason 跟 .message 是同一句`, e.reason, e.message);
+    const found = leaky.filter((x) => String(e.reason).includes(x));
+    ok(`${label} → .reason 一樣不夾帶內容`, found.length === 0, `夾帶了 ${found.join('、')}`);
+  }
+
+  // 不是我們丟的就不准有記號，否則那道防線會被繞過
+  ok('TypeError 沒有 .reason', new TypeError('fetch failed').reason === undefined);
+  ok('一般 Error 沒有 .reason', new Error('x').reason === undefined);
+
+  const src = fs.readFileSync(path.join(ROOT, '.github/scripts/notify.mjs'), 'utf8');
+  // fetchGist 與 parseGistState 裡的每一個 throw 都要走 gistError
+  const start = src.indexOf('async function fetchGist');
+  const end = src.indexOf('async function main');
+  const zone = src.slice(start, end);
+  ok('fetchGist／parseGistState 裡找得到 throw', zone.includes('throw '));
+  ok('那一段裡沒有裸的 throw new Error（全部要走 gistError）',
+    !zone.includes('throw new Error('), '還有裸的 throw new Error');
+  eq('六處 throw 全部走 gistError', (zone.match(/throw gistError\(/g) || []).length, 6);
+  // 只看 console.log 的參數，不要掃整個檔案——註解裡本來就會提到 `e2.message`
+  // 這五個字（在說明「絕對不要印它」），掃全檔會把自己的註解當成違規。
+  // 「log 不准印 .message」那一條由 testNoLeakyLogs 負責，它掃的是 console.log 的參數。
+  const logs = [...src.matchAll(/console\.log\(([\s\S]*?)\);\n/g)].map((m) => m[1]);
+  ok('有一行 log 印出 gist 失敗的原因',
+    logs.some((c) => c.includes('why')), '找不到印 why 的那一行');
+  ok('why 是從 .reason 來的，不是從 .message',
+    /const why = \(e2 && e2\.reason\)/.test(src), '不是 e2.reason');
+}
+
+// ---- 5f. 測試通知不可以被抓 gist 擋住 ----
+//
+// 「送一則測試通知」驗的是 Actions → Apple → 手機，跟 gist 無關。先前 forceTest
+// 排在 fetchGist 之後，gist 一失敗就 return 0——**最需要它來分辨問題的時候反而
+// 送不出去**。11-16 那次手動測試加上四次排程全部靜默，就是這個順序造成的。
+function testForceTestIndependentOfGist() {
+  const run = (state, forceTest) => decide({
+    V, th: TH, state, oldPrices: {}, newPrices: {},
+    now: Date.parse('2026-11-14T12:00:00Z'), forceTest
+  });
+  eq('抓不到 gist（state 為 null）＋勾了測試 → 還是送一則 test',
+    run(null, true).map((m) => m.kind), ['test']);
+  eq('抓不到 gist 且沒勾 → 什麼都不送', run(null, false).length, 0);
+  eq('state 是 undefined 也不爆', run(undefined, true).map((m) => m.kind), ['test']);
+
+  const src = fs.readFileSync(path.join(ROOT, '.github/scripts/notify.mjs'), 'utf8');
+  const iForce = src.indexOf('const forceTest =');
+  const iFetch = src.indexOf('await fetchGist');
+  ok('forceTest 在 await fetchGist 之前就算好',
+    iForce !== -1 && iFetch !== -1 && iForce < iFetch, `forceTest=${iForce} fetchGist=${iFetch}`);
+  ok('抓 gist 失敗後，沒勾測試才 return 0', src.includes('if (!forceTest) return 0;'));
+  // state 可能是 null，那一行 log 不能直接讀 .stocks。
+  // **這裡一定要比對完整的 log 片段，不能只找 `(state && state.stocks)`**——
+  // decide() 裡本來就有 `Array.isArray(state && state.stocks)`，只找那個子字串的話
+  // 不管 log 有沒有守門都會通過（空心斷言，突變測試抓到的）。
+  ok('log 那一行有守住 null state',
+    src.includes('追蹤 ${((state && state.stocks) || []).length} 檔'),
+    '那一行 log 直接讀了 state.stocks');
+}
+
 // ---- 6. 公開 log 的紀律 ----
 //
 // 這個 repo 是公開的，workflow 的 log 任何人都看得到，而通知內容就是他的估值。
@@ -483,6 +612,9 @@ const run = async () => {
   testDecideStaleAndTest();
   testBodyDatesAndWording();
   testGistParseNoLeak();
+  testSecretsTrimmed();
+  testGistErrorReason();
+  testForceTestIndependentOfGist();
   testNoLeakyLogs();
   await testMissingSecretsExitZero();
 

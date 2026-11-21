@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var BUILD = 25;           // 必須與 index.html 的 <meta name="app-build"> 一致
+  var BUILD = 26;           // 必須與 index.html 的 <meta name="app-build"> 一致
   var GAP_GOOD = -5;        // 落差 ≤ -5pp 視為市場低估
   var GAP_BAD = 5;          // 落差 ≥ +5pp 視為市場比我樂觀
   var TV_HEAVY = 60;        // 永續價值佔比 > 60% 要提醒
@@ -78,6 +78,21 @@
   }
 
   function settings() { return Store.getState().settings; }
+
+  // 6-10 年成長率留空＝沿用設定裡的預設值，**不是 0%**。
+  //
+  // 先前主計算器存 0%（`v.g610 === null ? 0 : v.g610`），而快速估值視窗存設定的
+  // 預設值——同一個欄位兩種行為。而這個差別不是小數點：實測 EPS 10、1-5 年 15%、
+  // 折現 10%、永續 2% 之下，6-10 年 2% vs 5% 的合理價是 216.48 vs 237.86（差 9.9%）；
+  // 現價 2135、EPS 86.25 時市場隱含 18.47% vs 16.01%（差 2.46pp）。
+  // **落差的訊號門檻是 ±5pp，2.46pp 足以讓紅綠燈翻面。**
+  // 所以「留空」不可以靜悄悄變成一個具體數字 0。
+  //
+  // store.js 的 normalizeRecord 本來就是 num(raw.cagr6_10, defaults.defaultCagr6_10)，
+  // notify.mjs 的 gapAt 也是同一條，這裡跟上，四個地方講同一句話。
+  function g610OrDefault(v) {
+    return (v === null || v === undefined) ? settings().defaultCagr6_10 : v;
+  }
 
   // ---- 計算（吃一筆 record） ----
 
@@ -275,7 +290,8 @@
 
   function recalcCalculator() {
     var v = readCalc();
-    var g610 = v.g610 === null ? 0 : v.g610;
+    // 顯示也要用同一個值，否則會變成「畫面用 0% 算、存進去用 5%」，比原本的不一致更糟。
+    var g610 = g610OrDefault(v.g610);
 
     ['resImplied', 'resFair', 'resGap', 'resUpside', 'resTv'].forEach(function (id) { setRes(id, '—'); });
     $('applyImplied').hidden = true;
@@ -461,7 +477,15 @@
   // 餘裕（而且那是用短名稱的測試資料量的，真實資料更少），放文字鍵會把表撐爆。
   // 日期與數值放 title，不逐列顯示。
   function pendingClose(stock) {
-    if (!Store.canPush()) return null;          // 手機是唯讀副本，帶了也會被下次拉覆蓋
+    // **判準是「這台是不是唯讀副本」，不是「能不能推」。**
+    // 先前寫 `if (!Store.canPush()) return null;`，但 canPush() 問的是 token && gistId，
+    // 所以兩種裝置會被誤判成手機：①還沒設定 gist 的正本（任何新裝置）、
+    // ②**token 剛好過期的電腦**——而他的 classic token 是有到期日的，
+    // 到期那天 Mac 上的帶入鍵與橫幅上的「N 檔可帶入」會無聲消失，
+    // 而他不會聯想到那是 token 的問題。
+    // 同一件事在 renderFreshTag()、saveQuick()、backupState() 三處都寫對了，
+    // 所以這裡直接重用 backupState()，讓這個判斷只留一份。
+    if (backupState().kind === 'replica') return null;
     var c = Store.closeOf(stock.ticker);
     if (!c) return null;
     if (stock.currentPrice !== null && stock.currentPrice !== undefined
@@ -1083,7 +1107,7 @@
     var g15 = numOrNull($('quickG15').value);
     var g610 = numOrNull($('quickG610').value);
     var rec = { price: price, eps: eps === null ? 0 : eps, myCagr1_5: g15,
-                cagr6_10: g610 === null ? st.defaultCagr6_10 : g610 };
+                cagr6_10: g610OrDefault(g610) };
     var c = computeRecord(rec, st);
     $('quickImplied').innerHTML = c.impliedStatus === 'ok'
       ? fmtPct(c.implied) : impliedHtml(c, rec.eps, price, '現價');
@@ -1129,7 +1153,7 @@
     Store.addRecord(stock.id, {
       date: Store.today(), label: '',
       price: price, eps: eps, myCagr1_5: g15,
-      cagr6_10: g610 === null ? settings().defaultCagr6_10 : g610,
+      cagr6_10: g610OrDefault(g610),
       note: ''
     });
     closeAllModals();
@@ -2280,7 +2304,7 @@
           price: v.price,      // 可為 null
           eps: v.eps,
           myCagr1_5: v.g15,
-          cagr6_10: v.g610 === null ? 0 : v.g610,
+          cagr6_10: g610OrDefault(v.g610),
           note: $('newNote').value
         });
         var sid = editing.stockId;
@@ -2309,7 +2333,7 @@
       price: v.price,          // 可為 null＝這一筆沒有記股價
       eps: v.eps,
       myCagr1_5: v.g15,                      // 留空就是 null＝未估，不是 0%
-      cagr6_10: v.g610 === null ? 0 : v.g610,
+      cagr6_10: g610OrDefault(v.g610),
       note: $('newNote').value
     });
 
